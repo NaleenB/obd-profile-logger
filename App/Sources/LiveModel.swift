@@ -3,81 +3,6 @@ import Observation
 import OBDLink
 import OBDCore
 
-/// What the shell polls. Deliberately a small fixed set for now: profile-driven
-/// tile generation is a separate milestone.
-enum LiveSignal: UInt8, CaseIterable {
-    case rpm = 0x0C
-    case speed = 0x0D
-    case coolant = 0x05
-    case map = 0x0B
-    case maf = 0x10
-    case load = 0x04
-    case rail = 0x23
-    case voltage = 0x42
-
-    var title: String {
-        switch self {
-        case .rpm: return "RPM"
-        case .speed: return "Speed"
-        case .coolant: return "Coolant"
-        case .map: return "MAP"
-        case .maf: return "Air flow"
-        case .load: return "Load"
-        case .rail: return "Rail"
-        case .voltage: return "Voltage"
-        }
-    }
-
-    var unit: String {
-        switch self {
-        case .rpm: return "rpm"
-        case .speed: return "km/h"
-        case .coolant: return "°C"
-        case .map: return "kPa"
-        case .maf: return "g/s"
-        case .load: return "%"
-        case .rail: return "bar"
-        case .voltage: return "V"
-        }
-    }
-
-    var fractionDigits: Int {
-        switch self {
-        case .rpm: return 0
-        case .voltage: return 2
-        case .maf: return 2
-        case .rail: return 1
-        default: return 0
-        }
-    }
-
-    /// Decodes the data bytes (mode/PID echo already removed).
-    func decode(_ data: [UInt8]) -> Double? {
-        switch self {
-        case .rpm:
-            guard data.count >= 2 else { return nil }
-            return (Double(data[0]) * 256 + Double(data[1])) / 4
-        case .speed, .coolant, .map, .load:
-            guard let a = data.first else { return nil }
-            switch self {
-            case .coolant: return Double(a) - 40
-            case .load: return Double(a) * 100 / 255
-            default: return Double(a)
-            }
-        case .maf:
-            guard data.count >= 2 else { return nil }
-            return (Double(data[0]) * 256 + Double(data[1])) / 100
-        case .rail:
-            // PID 0x23 is 10 kPa per bit; the UI shows bar, so divide by 10.
-            guard data.count >= 2 else { return nil }
-            return PIDScaling.railPressureBar(a: data[0], b: data[1])
-        case .voltage:
-            guard data.count >= 2 else { return nil }
-            return (Double(data[0]) * 256 + Double(data[1])) / 1000
-        }
-    }
-}
-
 @MainActor
 @Observable
 final class LiveModel {
@@ -104,7 +29,8 @@ final class LiveModel {
     var phase: Phase = .idle
     var status = "Not connected"
     var adapterName = ""
-    var values: [LiveSignal: Double] = [:]
+    /// Latest value per PID, keyed by two-digit hex.
+    var values: [String: Double] = [:]
     var dpf: DPFStatus?
     var lastUpdate: Date?
 
@@ -147,6 +73,15 @@ final class LiveModel {
         return profile.highlights(from: Array(manufacturer.values))
     }
 
+    /// Standard signals to display, straight from the profile.
+    var signals: [VehicleProfile.StandardSignal] { profile?.signals ?? [] }
+
+    private var dtcTargets: [DTCScanner.Target] {
+        (profile?.diagnosticModules ?? []).map {
+            DTCScanner.Target(module: $0.name, header: $0.requestHeader)
+        }
+    }
+
     // MARK: - Connection
 
     func connect() {
@@ -173,7 +108,11 @@ final class LiveModel {
                 _ = try? await client.send("ATL0", timeout: 2)
                 _ = try? await client.send("ATS0", timeout: 2)
                 _ = try? await client.send("ATH0", timeout: 2)
-                _ = try? await client.send("ATSP6", timeout: 2)
+                if let protocolValue = profile?.elmProtocol {
+                    _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
+                } else {
+                    _ = try? await client.send("ATSP0", timeout: 2)
+                }
 
                 phase = .connected
                 status = "Connected"
@@ -246,9 +185,7 @@ final class LiveModel {
             exportURL = nil
             notice = nil
             session.event(.sessionStarted, [
-                "polledPIDs": LiveSignal.allCases
-                    .map { String(format: "%02X", $0.rawValue) }
-                    .joined(separator: ",")
+                "polledPIDs": signals.map(\.pid).joined(separator: ",")
             ])
         } catch {
             recording = .failed("\(error)")
@@ -309,7 +246,7 @@ final class LiveModel {
                 // broadcast before sampling so live values keep their meaning.
                 _ = try? await elm.send("ATSH7DF", timeout: 2)
 
-                for signal in LiveSignal.allCases {
+                for signal in signals {
                     if Task.isCancelled { return }
                     await sample(signal, using: elm)
                 }
@@ -334,22 +271,23 @@ final class LiveModel {
     private var iteration = 0
 
     /// One live signal. A failed read writes nothing: absence is meaningful.
-    private func sample(_ signal: LiveSignal, using elm: ELMClient) async {
-        let command = String(format: "01%02X", signal.rawValue)
+    private func sample(_ signal: VehicleProfile.StandardSignal, using elm: ELMClient) async {
+        guard let pid = signal.pidValue else { return }
+        let command = String(format: "01%02X", pid)
         guard let reply = try? await elm.send(command, timeout: 2),
               let hex = reply.payloadHex,
-              hex.hasPrefix(String(format: "41%02X", signal.rawValue)),
+              hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4))),
               let value = signal.decode(data)
         else { return }
 
-        values[signal] = value
+        values[signal.pid] = value
         lastUpdate = Date()
 
         if isRecording {
             let written = session.sample(
-                pid: signal.rawValue,
-                name: signal.title,
+                pid: pid,
+                name: signal.name,
                 value: value,
                 unit: signal.unit,
                 raw: hex
@@ -366,7 +304,9 @@ final class LiveModel {
     private func stepDTCScan(using elm: ELMClient) async {
         if scanner == nil {
             guard Date().timeIntervalSince(lastDTCStep) >= dtcScanInterval else { return }
-            scanner = DTCScanner()
+            let targets = dtcTargets
+            guard !targets.isEmpty else { return }
+            scanner = DTCScanner(targets: targets)
             lastDTCStep = Date()
         }
         guard var active = scanner else { return }

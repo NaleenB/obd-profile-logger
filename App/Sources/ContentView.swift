@@ -19,9 +19,16 @@ struct ContentView: View {
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
             }
 
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(LiveSignal.allCases, id: \.self) { signal in
-                    Tile(signal: signal, value: model.values[signal])
+            if model.signals.isEmpty {
+                Text("No standard signals are defined by this vehicle profile.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(model.signals) { signal in
+                        Tile(signal: signal, value: model.values[signal.pid])
+                    }
                 }
             }
 
@@ -194,16 +201,16 @@ struct ContentView: View {
 }
 
 private struct Tile: View {
-    let signal: LiveSignal
+    let signal: VehicleProfile.StandardSignal
     let value: Double?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(signal.title)
+            Text(signal.name)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value.map { String(format: "%.\(signal.fractionDigits)f", $0) } ?? "—")
+                Text(value.map { signal.formatted($0) } ?? "—")
                     .font(.system(.title2, design: .rounded).weight(.medium))
                     .monospacedDigit()
                 Text(signal.unit)

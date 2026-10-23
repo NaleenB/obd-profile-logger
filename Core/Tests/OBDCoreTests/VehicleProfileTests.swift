@@ -105,3 +105,73 @@ final class VehicleProfileTests: XCTestCase {
         }
     }
 }
+
+final class StandardSignalTests: XCTestCase {
+
+    private func shippedProfile() throws -> VehicleProfile {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("profiles/mitsubishi/outlander-2016-4n14.json")
+        return try VehicleProfileLoader.load(from: url)
+    }
+
+    private func signal(_ pid: String, in profile: VehicleProfile) throws -> VehicleProfile.StandardSignal {
+        try XCTUnwrap(profile.signals.first { $0.pid == pid }, "missing pid \(pid)")
+    }
+
+    /// Values captured from the car, decoded through the shipped profile.
+    func testKnownRawValuesDecodeCorrectly() throws {
+        let profile = try shippedProfile()
+
+        // RPM 0x0A28 = 2600 / 4 = 650
+        XCTAssertEqual(try signal("0C", in: profile).decode([0x0A, 0x28]) ?? 0, 650, accuracy: 0.001)
+        // Coolant 0x55 = 85 - 40 = 45
+        XCTAssertEqual(try signal("05", in: profile).decode([0x55]) ?? 0, 45, accuracy: 0.001)
+        // Speed
+        XCTAssertEqual(try signal("0D", in: profile).decode([0x00]) ?? -1, 0, accuracy: 0.001)
+        // Rail pressure 0x0D2C -> 337.2 bar
+        XCTAssertEqual(try signal("23", in: profile).decode([0x0D, 0x2C]) ?? 0, 337.2, accuracy: 0.01)
+        // Module voltage 0x37BA -> 14.266 V
+        XCTAssertEqual(try signal("42", in: profile).decode([0x37, 0xBA]) ?? 0, 14.266, accuracy: 0.001)
+        // MAF 0x0257 -> 5.99 g/s
+        XCTAssertEqual(try signal("10", in: profile).decode([0x02, 0x57]) ?? 0, 5.99, accuracy: 0.001)
+    }
+
+    func testLoadScaling() throws {
+        let profile = try shippedProfile()
+        let load = try signal("04", in: profile)
+        // 0xFF is full scale.
+        XCTAssertEqual(load.decode([0xFF]) ?? 0, 100, accuracy: 0.01)
+        XCTAssertEqual(load.decode([0x00]) ?? -1, 0, accuracy: 0.01)
+    }
+
+    func testShortDataDoesNotFabricate() throws {
+        let profile = try shippedProfile()
+        XCTAssertNil(try signal("0C", in: profile).decode([0x0A]))
+        XCTAssertNil(try signal("23", in: profile).decode([]))
+    }
+
+    func testTransportDescribesModulesAndProtocol() throws {
+        let profile = try shippedProfile()
+        XCTAssertEqual(profile.elmProtocol, "6")
+        XCTAssertEqual(profile.diagnosticModules.map(\.name), ["ECM", "TCM"])
+        XCTAssertEqual(profile.diagnosticModules.first?.requestHeader, "7E0")
+    }
+
+    func testProfileWithoutStandardSignalsYieldsNone() throws {
+        let json = """
+        {"schemaVersion":1,"id":"x","manufacturer":"X","model":"Y","year":2020,
+         "engine":"1.0","notes":[],"service":{"readByLocalIdentifier":null,"readByIdentifier":null},
+         "blocks":[]}
+        """
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("p-\(UUID().uuidString).json")
+        try Data(json.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let profile = try VehicleProfileLoader.load(from: url)
+        XCTAssertTrue(profile.signals.isEmpty)
+        XCTAssertTrue(profile.diagnosticModules.isEmpty)
+        XCTAssertNil(profile.elmProtocol, "absent protocol must leave the adapter on auto-detect")
+    }
+}

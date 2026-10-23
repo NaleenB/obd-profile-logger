@@ -94,6 +94,32 @@ def load_ecu(path):
     return item_to_qual, quals
 
 
+# Standard OBD-II signals this build polls. Scaling is data, not code:
+# value = raw * factor + offset, with `bytes` read big-endian.
+STANDARD_SIGNALS = [
+    {"pid": "0C", "name": "Engine speed",            "unit": "rpm",   "bytes": 2, "factor": 0.25,   "offset": 0,   "decimals": 0},
+    {"pid": "0D", "name": "Vehicle speed",           "unit": "km/h",  "bytes": 1, "factor": 1.0,    "offset": 0,   "decimals": 0},
+    {"pid": "05", "name": "Coolant temperature",     "unit": "degC",  "bytes": 1, "factor": 1.0,    "offset": -40, "decimals": 0},
+    {"pid": "0B", "name": "Intake MAP",              "unit": "kPa",   "bytes": 1, "factor": 1.0,    "offset": 0,   "decimals": 0},
+    {"pid": "10", "name": "Mass air flow",           "unit": "g/s",   "bytes": 2, "factor": 0.01,   "offset": 0,   "decimals": 2},
+    {"pid": "04", "name": "Calculated load",         "unit": "%",     "bytes": 1, "factor": 0.392157, "offset": 0, "decimals": 0},
+    {"pid": "23", "name": "Fuel rail pressure",      "unit": "bar",   "bytes": 2, "factor": 0.1,    "offset": 0,   "decimals": 1},
+    {"pid": "42", "name": "Control module voltage",  "unit": "V",     "bytes": 2, "factor": 0.001,  "offset": 0,   "decimals": 2},
+    {"pid": "0F", "name": "Intake air temperature",  "unit": "degC",  "bytes": 1, "factor": 1.0,    "offset": -40, "decimals": 0},
+    {"pid": "33", "name": "Barometric pressure",     "unit": "kPa",   "bytes": 1, "factor": 1.0,    "offset": 0,   "decimals": 0},
+]
+
+# ISO 15765-4 CAN 11/500. ELM `ATSP` value 6; 0 means auto-detect.
+TRANSPORT = {
+    "elmProtocol": "6",
+    "description": "ISO 15765-4 (CAN 11/500)",
+    "modules": [
+        {"name": "ECM", "requestHeader": "7E0", "responseHeader": "7E8"},
+        {"name": "TCM", "requestHeader": "7E1", "responseHeader": "7E9"},
+    ],
+}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ecu", required=True)
@@ -162,6 +188,8 @@ def main():
             "readByLocalIdentifier": "21",
             "readByIdentifier": None,
         },
+        "transport": TRANSPORT,
+        "standard": STANDARD_SIGNALS,
         "notes": [
             "Service 0x22 is not implemented by this ECU; it replies NRC 0x11.",
             "Byte offsets are absolute within the response frame, counting the 0x61 "

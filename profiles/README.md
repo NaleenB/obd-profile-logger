@@ -55,6 +55,41 @@ This matters: on the Outlander, `0x22` returns NRC `0x11` (service not
 supported), so probing it wastes time. Record what you found, not what you
 expected.
 
+### `transport`
+
+Tells the app how to talk to this vehicle at all. Optional; absent means the
+adapter is left on auto-detect and no module-specific DTC scan is attempted.
+
+```json
+"transport": {
+  "elmProtocol": "6",
+  "description": "ISO 15765-4 (CAN 11/500)",
+  "modules": [
+    { "name": "ECM", "requestHeader": "7E0", "responseHeader": "7E8" },
+    { "name": "TCM", "requestHeader": "7E1", "responseHeader": "7E9" }
+  ]
+}
+```
+
+`elmProtocol` is the `ATSP` value: `"6"` pins CAN 11/500, `"0"` or absent means
+auto-detect. Pinning saves seconds per connection but will fail on a vehicle
+using a different bus, so leave it at `"0"` unless you have confirmed the
+protocol.
+
+### `standard`
+
+The standard OBD-II signals to poll, described as data. No decoding code is
+needed per PID: `value = raw * factor + offset`, read big-endian over `bytes`
+(1 or 2).
+
+```json
+{ "pid": "23", "name": "Fuel rail pressure", "unit": "bar",
+  "bytes": 2, "factor": 0.1, "offset": 0, "decimals": 1 }
+```
+
+This is what makes the tool work on a car it has never seen: a profile that lists
+PIDs `05`, `0C`, `0D` with their scaling will display them, with no code change.
+
 ### `blocks`
 
 Each block is one request, keyed by its local identifier.

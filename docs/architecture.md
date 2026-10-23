@@ -86,8 +86,11 @@ a multi-second scan never stalls sampling.
 
 ## Manufacturer data in the app
 
-The app ships the vehicle profile as a bundle resource and decodes service `0x21`
-blocks from it. Nothing about a specific manufacturer is compiled in: the tile
+The app ships the vehicle profile as a bundle resource and takes three things
+from it: the ELM protocol selector, the module headers used for DTC scans, and
+
+- the standard `01` signal list with its scaling (`value = raw * factor + offset`)
+- the service `0x21` blocks. Nothing about a specific manufacturer is compiled in: the tile
 list, byte offsets and scaling all come from JSON.
 
 A full sweep of 76 local identifiers is stepped one per polling iteration, so it

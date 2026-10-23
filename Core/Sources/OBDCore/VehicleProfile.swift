@@ -11,6 +11,51 @@ public struct VehicleProfile: Codable, Equatable {
         public let readByIdentifier: String?
     }
 
+    /// A module that answers diagnostic requests, with its CAN request header.
+    public struct Module: Codable, Equatable {
+        public let name: String
+        public let requestHeader: String
+        public let responseHeader: String?
+    }
+
+    /// How to talk to the vehicle at all. Absent means "assume the defaults".
+    public struct Transport: Codable, Equatable {
+        /// ELM327 `ATSP` value: "6" is CAN 11/500, "0" is auto-detect.
+        public let elmProtocol: String
+        public let description: String?
+        public let modules: [Module]
+    }
+
+    /// One standard OBD-II signal, described as data rather than decoded in code:
+    /// `value = raw * factor + offset`, read big-endian over `bytes` bytes.
+    public struct StandardSignal: Codable, Equatable, Identifiable {
+        public let pid: String
+        public let name: String
+        public let unit: String
+        public let bytes: Int
+        public let factor: Double
+        public let offset: Double
+        public let decimals: Int
+
+        public var id: String { pid }
+        public var pidValue: UInt8? { UInt8(pid, radix: 16) }
+
+        public func decode(_ data: [UInt8]) -> Double? {
+            guard bytes == 1 || bytes == 2, data.count >= bytes else { return nil }
+            let raw: UInt32
+            if bytes == 1 {
+                raw = UInt32(data[0])
+            } else {
+                raw = (UInt32(data[0]) << 8) | UInt32(data[1])
+            }
+            return Double(raw) * factor + offset
+        }
+
+        public func formatted(_ value: Double) -> String {
+            String(format: "%.\(decimals)f", value)
+        }
+    }
+
     public struct Observed: Codable, Equatable {
         public let raw: Int
         public let value: Double
@@ -46,7 +91,22 @@ public struct VehicleProfile: Codable, Equatable {
     public let market: String?
     public let notes: [String]
     public let service: Service
+    public let transport: Transport?
+    public let standard: [StandardSignal]?
     public let blocks: [Block]
+
+    /// Standard signals to poll, falling back to an empty list rather than
+    /// inventing a set.
+    public var signals: [StandardSignal] { standard ?? [] }
+
+    /// Modules to scan for DTCs. Empty when the profile does not say.
+    public var diagnosticModules: [Module] { transport?.modules ?? [] }
+
+    /// ELM protocol selector, or nil to leave the adapter on auto-detect.
+    public var elmProtocol: String? {
+        guard let value = transport?.elmProtocol, !value.isEmpty, value != "0" else { return nil }
+        return value
+    }
 }
 
 public struct DecodedParameter: Equatable, Identifiable {
