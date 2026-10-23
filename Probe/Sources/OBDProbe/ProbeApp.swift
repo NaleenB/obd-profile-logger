@@ -1,4 +1,5 @@
 import Foundation
+import OBDCore
 import Darwin
 
 @main
@@ -369,7 +370,7 @@ struct ProbeApp {
               "got \(dupBitmap.payloadHex ?? "nil")")
 
         let noCodes = ELMClient.parse(command: "03", raw: "4300\r4300\r\r>")
-        let phantom = DTC.list(from: noCodes.dataBytes ?? [])
+        let phantom = DTCDecoder.codes(fromHex: hexString(noCodes.dataBytes ?? [])) ?? []
         check("two empty DTC frames fabricate no codes", phantom.isEmpty, "got \(phantom)")
 
         let calid = ELMClient.parse(
@@ -386,8 +387,8 @@ struct ProbeApp {
               "got \(expanded.map { String(format: "%02X", $0) })")
 
         // DTC decoding
-        check("DTC P0301", DTC.decode([0x03, 0x01]) == "P0301", "got \(DTC.decode([0x03, 0x01]))")
-        check("DTC U0100", DTC.decode([0xC1, 0x00]) == "U0100", "got \(DTC.decode([0xC1, 0x00]))")
+        check("DTC P0301", DTCDecoder.decode([0x03, 0x01]) == "P0301", "got \(DTCDecoder.decode([0x03, 0x01]))")
+        check("DTC U0100", DTCDecoder.decode([0xC1, 0x00]) == "U0100", "got \(DTCDecoder.decode([0xC1, 0x00]))")
 
         say("")
         if failures == 0 {

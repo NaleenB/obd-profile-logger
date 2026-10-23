@@ -756,61 +756,110 @@ final class Probe {
 
     // MARK: - DTCs
 
+    /// Queries each module by name rather than trusting one broadcast reply.
+    ///
+    /// Both the engine (7E8) and transmission (7E9) answer generic OBD on this
+    /// vehicle. Addressing them individually keeps each module's codes attached
+    /// to that module, and lets the report say when a module did not answer
+    /// instead of implying a clean bill of health.
     private func readDTCs() async throws {
         rule("Diagnostic trouble codes")
 
-        // Monitor status doubles as the MIL / DTC-count indicator.
-        if let reply = try? await elm.send("0101", timeout: 3),
-           let hex = reply.payloadHex, hex.hasPrefix("4101") {
-            let bytes = bytesFromHex(String(hex.dropFirst(4))) ?? []
-            if bytes.count >= 2 {
-                let a = bytes[0]
-                let milOn = (a & 0x80) != 0
-                let count = Int(a & 0x7F)
-                dtcs["milOn"] = milOn
-                dtcs["dtcCount"] = count
-                dtcs["monitorStatusRaw"] = hex
-                say("  MIL    → \(milOn ? "ON" : "off"), \(count) DTC(s) reported")
-            }
-        } else {
-            say("  MIL    → unavailable")
-        }
-
-        let modes: [(String, String)] = [
-            ("03", "stored"),
-            ("07", "pending"),
-            ("0A", "permanent")
+        let targets: [(module: String, header: String)] = [
+            ("ECM", "7E0"),
+            ("TCM", "7E1")
         ]
 
-        for (mode, label) in modes {
-            guard let reply = try? await elm.send(mode, timeout: 5) else {
-                dtcs[label] = ["error": "no reply"]
-                say("  Mode \(mode) (\(label)) → no reply")
-                continue
+        _ = try? await elm.send("ATH0", timeout: 3)
+
+        var modules: [ModuleDiagnostics] = []
+
+        for target in targets {
+            _ = try? await elm.send("ATSH" + target.header, timeout: 3)
+
+            var milOn: Bool?
+            var reported: Int?
+
+            if let reply = try? await elm.send("0101", timeout: 3),
+               let hex = reply.payloadHex, hex.hasPrefix("4101"),
+               let bytes = bytesFromHex(String(hex.dropFirst(4))), bytes.count >= 2 {
+                milOn = (bytes[0] & 0x80) != 0
+                reported = Int(bytes[0] & 0x7F)
             }
 
-            guard let hex = reply.payloadHex else {
-                dtcs[label] = ["raw": reply.statusSummary, "codes": []]
-                say("  Mode \(mode) (\(label)) → \(reply.statusSummary)")
-                continue
-            }
+            let stored = await queryCodes(mode: "03")
+            let pending = await queryCodes(mode: "07")
+            let permanent = await queryCodes(mode: "0A")
 
-            let header = "4\(mode.suffix(1))"
-            var tail = hex
-            if hex.hasPrefix(header) {
-                tail = String(hex.dropFirst(header.count))
+            let module = ModuleDiagnostics(
+                module: target.module,
+                header: target.header,
+                milOn: milOn,
+                reportedDTCs: reported,
+                stored: stored,
+                pending: pending,
+                permanent: permanent
+            )
+            modules.append(module)
+
+            let milText = milOn.map { $0 ? "ON" : "off" } ?? "unknown"
+            say("  \(target.module) (7E\(target.header.hasSuffix("0") ? "8" : "9"))  MIL \(milText), \(reported ?? -1) reported")
+            say("      stored:    \(describe(stored))")
+            say("      pending:   \(describe(pending))")
+            say("      permanent: \(describe(permanent))")
+            if !module.isComplete {
+                say("      ! incomplete — a query did not answer or could not be decoded")
             }
-            let bytes = bytesFromHex(tail) ?? []
-            let codes = DTC.list(from: bytes)
-            dtcs[label] = ["raw": hex, "codes": codes]
-            say("  Mode \(mode) (\(label)) → \(codes.isEmpty ? "none" : codes.joined(separator: ", "))")
         }
 
-        // Freeze frame, if any.
+        // Restore broadcast addressing.
+        _ = try? await elm.send("ATSH7DF", timeout: 3)
+        _ = try? await elm.send("ATAR", timeout: 3)
+
+        let diagnostics = VehicleDiagnostics(modules: modules)
+        say("")
+        say("  \(diagnostics.headline)")
+
+        dtcs = [
+            "complete": diagnostics.isComplete,
+            "incompleteModules": diagnostics.modulesIncomplete,
+            "modules": modules.map { module -> [String: Any] in
+                var entry: [String: Any] = [
+                    "module": module.module,
+                    "header": module.header,
+                    "complete": module.isComplete
+                ]
+                if let value = module.milOn { entry["milOn"] = value }
+                if let value = module.reportedDTCs { entry["reportedDTCs"] = value }
+                entry["stored"] = module.stored ?? []
+                entry["pending"] = module.pending ?? []
+                entry["permanent"] = module.permanent ?? []
+                return entry
+            }
+        ]
+
+        // Freeze frame, if any. Broadcast is fine: it is not a per-module query.
         if let reply = try? await elm.send("0200", timeout: 5), let hex = reply.payloadHex {
             dtcs["freezeFramePID00"] = hex
             say("  Freeze frame → \(hex)")
         }
+    }
+
+    /// Returns decoded codes, or nil when the module did not answer or the reply
+    /// could not be interpreted.
+    private func queryCodes(mode: String) async -> [String]? {
+        guard let reply = try? await elm.send(mode, timeout: 5),
+              let hex = reply.payloadHex
+        else { return nil }
+
+        let header = "4" + String(mode.suffix(1))
+        guard hex.hasPrefix(header) else { return nil }
+        return DTCDecoder.codes(fromHex: String(hex.dropFirst(header.count)))
+    }
+
+    private func describe(_ codes: [String]?) -> String {
+        guard let codes else { return "no answer" }
+        return codes.isEmpty ? "none" : codes.joined(separator: ", ")
     }
 
     // MARK: - Output

@@ -23,6 +23,9 @@ public enum BatteryPhase: String, Equatable {
 
 public struct BatteryReport {
     public let phaseReached: BatteryPhase
+    /// True only when a cranking phase was actually observed. Monitoring that
+    /// begins with the engine already running has no start event to grade.
+    public let startObserved: Bool
     /// Last voltage seen before the crank began.
     public let preCrankVolts: Double?
     /// Lowest voltage observed while cranking. The number that matters.
@@ -35,10 +38,11 @@ public struct BatteryReport {
     public let sampleCount: Int
     public let findings: [Finding]
 
-    /// Incomplete tests never produce a battery verdict, even when individual
-    /// observations are worth showing.
+    /// A battery verdict requires a complete start event. Running-voltage
+    /// observations are still reported, but they cannot clear or condemn a
+    /// battery on their own.
     public var verdict: Severity {
-        guard phaseReached == .running else { return .insufficientData }
+        guard startObserved, phaseReached == .running else { return .insufficientData }
         return HealthEvaluator.worst(findings)
     }
 }
@@ -57,6 +61,7 @@ public final class BatteryMonitor {
 
     private var samples: [VoltageSample] = []
     private var phase: BatteryPhase = .unknown
+    private(set) public var observedCrank = false
     private var preCrankVolts: Double?
     private var crankMinimum: Double?
     private var crankStartMs: Int?
@@ -74,6 +79,10 @@ public final class BatteryMonitor {
 
         let previous = phase
         let next = classify(sample)
+
+        // Record a start event only when a crank was actually seen, whether from
+        // RPM or from the voltage dip fallback.
+        if next == .cranking { observedCrank = true }
 
         // Latch: once the engine is running, a later dip is not a new crank.
         if next.rawRank >= phase.rawRank {
@@ -180,13 +189,15 @@ public final class BatteryMonitor {
             ))
         }
 
-        if phase != .running {
+        if !observedCrank {
             findings.append(Finding(
                 key: "no_start_observed",
                 label: "Start event",
                 severity: .insufficientData,
-                message: "No crank followed by a running engine was observed.",
-                source: .heuristic("battery test requires a start"),
+                message: phase == .running
+                    ? "Monitoring began with the engine already running, so no crank was measured. Restart with the engine off to grade the battery."
+                    : "No crank followed by a running engine was observed.",
+                source: .heuristic("a battery test requires a captured start"),
                 observed: nil,
                 unit: "V"
             ))
@@ -194,6 +205,7 @@ public final class BatteryMonitor {
 
         return BatteryReport(
             phaseReached: phase,
+            startObserved: observedCrank,
             preCrankVolts: preCrankVolts,
             crankMinimumVolts: crankMinimum,
             crankDurationMs: {

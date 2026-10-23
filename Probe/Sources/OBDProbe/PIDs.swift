@@ -168,29 +168,3 @@ enum PIDTable {
         }
     }
 }
-
-enum DTC {
-    static func decode(_ bytes: [UInt8]) -> String {
-        guard bytes.count >= 2 else { return "??" }
-        let systems: [Character] = ["P", "C", "B", "U"]
-        let system = systems[Int(bytes[0] >> 6)]
-        let d1 = (bytes[0] >> 4) & 0x03
-        let d2 = bytes[0] & 0x0F
-        let d3 = (bytes[1] >> 4) & 0x0F
-        let d4 = bytes[1] & 0x0F
-        func hexDigit(_ v: UInt8) -> String { String(v, radix: 16, uppercase: true) }
-        return "\(system)\(d1)\(hexDigit(d2))\(hexDigit(d3))\(hexDigit(d4))"
-    }
-
-    static func list(from data: [UInt8]) -> [String] {
-        var codes: [String] = []
-        var idx = 0
-        while idx + 1 < data.count {
-            let pair = [data[idx], data[idx + 1]]
-            idx += 2
-            if pair[0] == 0 && pair[1] == 0 { continue }
-            codes.append(decode(pair))
-        }
-        return codes
-    }
-}

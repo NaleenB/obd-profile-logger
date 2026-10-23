@@ -128,3 +128,42 @@ final class BatteryMonitorTests: XCTestCase {
         XCTAssertGreaterThan(r.recoveryMs ?? 0, 1000)
     }
 }
+
+/// P1: monitoring that begins with the engine already running is not a battery
+/// test, and must not produce a verdict.
+final class BatteryMonitorStartTests: XCTestCase {
+
+    func testAlreadyRunningProducesNoVerdict() {
+        let monitor = BatteryMonitor()
+        for (ms, volts) in [(0, 14.1), (1000, 14.2), (2000, 14.1)] {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: 700))
+        }
+        let report = monitor.report()
+        XCTAssertEqual(report.phaseReached, .running)
+        XCTAssertFalse(report.startObserved)
+        XCTAssertEqual(report.verdict, .insufficientData)
+        XCTAssertNil(report.crankMinimumVolts)
+        // Charging is still reported, it just cannot clear the battery.
+        XCTAssertEqual(report.runningVolts, 14.1)
+    }
+
+    func testCompleteStartStillGrades() {
+        let monitor = BatteryMonitor()
+        for (ms, volts, rpm) in [(0, 12.4, 0.0), (500, 10.1, 180.0), (1500, 14.1, 700.0), (3000, 14.2, 700.0)] {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: rpm))
+        }
+        let report = monitor.report()
+        XCTAssertTrue(report.startObserved)
+        XCTAssertEqual(report.verdict, .ok)
+    }
+
+    func testVoltageOnlyCrankFallbackStillCounts() {
+        let monitor = BatteryMonitor()
+        for (ms, volts) in [(0, 12.4), (500, 9.8), (1400, 14.1), (3000, 14.2)] {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: nil))
+        }
+        let report = monitor.report()
+        XCTAssertTrue(report.startObserved)
+        XCTAssertEqual(report.verdict, .ok)
+    }
+}

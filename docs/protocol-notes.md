@@ -118,3 +118,28 @@ manufacturer tool.
 Every command used here reads. Services `2E` (write), `2F` (input/output
 control) and `31` (routine control) can change ECU state — a forced DPF
 regeneration, for example. Do not send them blind. This project does not.
+
+## DTC scanning across modules
+
+Because several modules answer a broadcast request, DTC reads must be
+**addressed per module**, not taken from one concatenated payload:
+
+```
+ATH0
+ATSH 7E0     ; engine
+0101 / 03 / 07 / 0A
+ATSH 7E1     ; transmission
+0101 / 03 / 07 / 0A
+ATSH 7DF     ; restore broadcast
+ATAR
+```
+
+Rules:
+
+- Keep every module's codes attached to that module. Never merge payloads.
+- An empty answer (`43 00`) means "no codes". No answer means **unknown**, and
+  the scan is reported as incomplete.
+- Do not present a scan as vehicle-wide when a module failed to answer.
+
+ABS, SRS, AWD and body modules do not answer generic OBD on this vehicle and are
+deliberately out of scope.

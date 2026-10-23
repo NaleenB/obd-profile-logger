@@ -16,7 +16,7 @@ final class MUT21Tests: XCTestCase {
         let frame = try XCTUnwrap(MUT21Frame(hex: "6112B1E6007B00E60000000000"))
         let regen = MUT21.decodeRegeneration(frame)
         XCTAssertEqual(regen.count, 123)
-        XCTAssertEqual(regen.requested, false)
+        XCTAssertEqual(regen.mode, .notRequested)
     }
 
     /// The whole point of the absolute-offset convention: battery voltage must
@@ -44,7 +44,7 @@ final class MUT21Tests: XCTestCase {
         let status = MUT21.status(from: frames)
         XCTAssertEqual(status.sootByAccumulation, 2.6)
         XCTAssertEqual(status.regenerationCount, 123)
-        XCTAssertEqual(status.regenerationRequested, false)
+        XCTAssertEqual(status.regenerationMode, .notRequested)
         XCTAssertEqual(try XCTUnwrap(MUT21.sootFraction(status)), 2.6 / 12.75, accuracy: 0.0001)
     }
 
@@ -60,5 +60,25 @@ final class MUT21Tests: XCTestCase {
     func testSootMaxMatchesManualRange() {
         // 8-bit value at 0.05 g/L per bit.
         XCTAssertEqual(Double(255) * MUT21.sootGramsPerLitrePerBit, 12.75, accuracy: 0.0001)
+    }
+
+    /// A non-zero mode is not evidence that regeneration was requested. The
+    /// enum mapping is unverified, so it must surface as unknown.
+    func testUnrecognisedModeIsNotReportedAsRequested() throws {
+        // Same frame as the capture but mode byte 6 = 0x03.
+        let frame = try XCTUnwrap(MUT21Frame(hex: "6112B1E6007B03E60000000000"))
+        let regen = MUT21.decodeRegeneration(frame)
+        XCTAssertEqual(regen.count, 123)
+        XCTAssertEqual(regen.mode, .unknown(raw: 3))
+        XCTAssertNotEqual(regen.mode, .notRequested)
+    }
+
+    func testRawModeValueRetained() throws {
+        let frame = try XCTUnwrap(MUT21Frame(hex: "6112B1E6007B02E60000000000"))
+        let regen = MUT21.decodeRegeneration(frame)
+        guard case .unknown(let raw)? = regen.mode else {
+            return XCTFail("expected unknown mode, got \(String(describing: regen.mode))")
+        }
+        XCTAssertEqual(raw, 0x02)
     }
 }

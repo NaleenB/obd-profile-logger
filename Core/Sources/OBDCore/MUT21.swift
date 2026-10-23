@@ -55,18 +55,28 @@ public struct DPFStatus: Equatable {
     public let sootByPressure: Double?
     /// Lifetime regeneration count.
     public let regenerationCount: Int?
-    /// True when the ECU says a regeneration is wanted or running.
-    public let regenerationRequested: Bool?
+    /// Raw regeneration mode, preserved because its enum mapping is not
+    /// established beyond "0 means not requested".
+    public let regenerationMode: RegenerationMode?
 
     public init(sootByAccumulation: Double? = nil,
                 sootByPressure: Double? = nil,
                 regenerationCount: Int? = nil,
-                regenerationRequested: Bool? = nil) {
+                regenerationMode: RegenerationMode? = nil) {
         self.sootByAccumulation = sootByAccumulation
         self.sootByPressure = sootByPressure
         self.regenerationCount = regenerationCount
-        self.regenerationRequested = regenerationRequested
+        self.regenerationMode = regenerationMode
     }
+}
+
+public enum RegenerationMode: Equatable {
+    /// The ECU reports no regeneration is wanted. Value 0 is confirmed by a
+    /// real capture.
+    case notRequested
+    /// A non-zero mode whose meaning has not been established. Reported as
+    /// unknown rather than guessed at.
+    case unknown(raw: Int)
 }
 
 public enum MUT21 {
@@ -90,10 +100,17 @@ public enum MUT21 {
     }
 
     /// Decodes the regeneration block (LID 0x12).
-    public static func decodeRegeneration(_ frame: MUT21Frame) -> (count: Int?, requested: Bool?) {
+    ///
+    /// The mode byte is an enum in the manufacturer data list, but only the
+    /// zero case has been confirmed against a capture. Non-zero values are
+    /// preserved as `.unknown(raw:)` rather than being flattened to "requested",
+    /// which would assert something we cannot support.
+    public static func decodeRegeneration(_ frame: MUT21Frame) -> (count: Int?, mode: RegenerationMode?) {
         let count = frame.value(at: 4, length: 2)
-        let mode = frame.value(at: 6, length: 1)
-        return (count, mode.map { $0 != 0 })
+        let mode: RegenerationMode? = frame.value(at: 6, length: 1).map {
+            $0 == 0 ? .notRequested : .unknown(raw: $0)
+        }
+        return (count, mode)
     }
 
     /// Builds a DPF status from whichever frames were answered.
@@ -108,7 +125,7 @@ public enum MUT21 {
                     sootByAccumulation: decoded.accumulation,
                     sootByPressure: decoded.pressure,
                     regenerationCount: status.regenerationCount,
-                    regenerationRequested: status.regenerationRequested
+                    regenerationMode: status.regenerationMode
                 )
                 break
             }
@@ -120,7 +137,7 @@ public enum MUT21 {
                 sootByAccumulation: status.sootByAccumulation,
                 sootByPressure: status.sootByPressure,
                 regenerationCount: decoded.count,
-                regenerationRequested: decoded.requested
+                regenerationMode: decoded.mode
             )
         }
 
