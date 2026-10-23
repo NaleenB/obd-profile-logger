@@ -13,10 +13,10 @@ undone, the files are plain XML.
 
 ## Vehicle identification
 
-Our VIN `JMFXLGF6WHZ000651` resolves in `CommonDB/VIN_Search` to:
+The vehicle VIN resolves in `CommonDB/VIN_Search` to (last six digits redacted here):
 
 ```
-TY 334   KD 2540   MY 17
+TY 334   KD 2540   MY 17      (VIN JMFXLGF6WHZ######)
 ```
 
 `CommonDB/Vehicle_DB` maps that to `VHCL_ID 40`, `ENGINE_ID U24`,
