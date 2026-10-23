@@ -28,7 +28,7 @@ public struct VehicleProfile: Codable, Equatable {
 
     /// One standard OBD-II signal, described as data rather than decoded in code:
     /// `value = raw * factor + offset`, read big-endian over `bytes` bytes.
-    public struct StandardSignal: Codable, Equatable, Identifiable {
+    public struct StandardSignal: Codable, Equatable, Identifiable, Sendable {
         public let pid: String
         public let name: String
         public let unit: String

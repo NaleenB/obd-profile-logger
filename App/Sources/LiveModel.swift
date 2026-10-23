@@ -73,13 +73,28 @@ final class LiveModel {
         return profile.highlights(from: Array(manufacturer.values))
     }
 
-    /// Standard signals to display, straight from the profile.
-    var signals: [VehicleProfile.StandardSignal] { profile?.signals ?? [] }
+    /// Signals actually displayed. Profile first, generic fallback second, and
+    /// filtered to what the car reports supporting when that is known.
+    ///
+    /// This is why an unsupported PID never becomes a permanent dash: it is
+    /// dropped from the list instead.
+    private(set) var signals: [VehicleProfile.StandardSignal] = []
 
+    /// PIDs the ECU advertised. Empty means discovery has not run or failed, in
+    /// which case nothing is filtered out.
+    private(set) var supportedPIDs: Set<UInt8> = []
+
+    /// Module headers for DTC scans. Falls back to the near-universal CAN
+    /// engine/transmission pair when a profile does not say.
     private var dtcTargets: [DTCScanner.Target] {
-        (profile?.diagnosticModules ?? []).map {
-            DTCScanner.Target(module: $0.name, header: $0.requestHeader)
+        let modules = profile?.diagnosticModules ?? []
+        if modules.isEmpty {
+            return [
+                DTCScanner.Target(module: "ECM", header: "7E0"),
+                DTCScanner.Target(module: "TCM", header: "7E1")
+            ]
         }
+        return modules.map { DTCScanner.Target(module: $0.name, header: $0.requestHeader) }
     }
 
     // MARK: - Connection
@@ -108,14 +123,29 @@ final class LiveModel {
                 _ = try? await client.send("ATL0", timeout: 2)
                 _ = try? await client.send("ATS0", timeout: 2)
                 _ = try? await client.send("ATH0", timeout: 2)
+                // Prefer the profile's protocol, but never trust it blindly: a
+                // wrong pin means no data at all, so fall back to auto-detect.
+                var protocolAccepted = false
                 if let protocolValue = profile?.elmProtocol {
                     _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
+                    protocolAccepted = await ECUResponds(using: client)
+                    if !protocolAccepted {
+                        _ = try? await client.send("ATSP0", timeout: 3)
+                    }
                 } else {
-                    _ = try? await client.send("ATSP0", timeout: 2)
+                    _ = try? await client.send("ATSP0", timeout: 3)
                 }
 
+                await discoverCapabilities(using: client)
+                rebuildSignalList()
+
                 phase = .connected
-                status = "Connected"
+                status = signals.isEmpty ? "Connected — no supported PIDs found" : "Connected"
+
+                if let protocolName = try? await client.send("ATDP", timeout: 2) {
+                    protocolDescription = protocolName.statusSummary
+                }
+                _ = protocolAccepted
 
                 // Read DPF once for immediate display. Recording is usually not
                 // active yet; the profile sweep records these same LIDs when it is.
@@ -233,6 +263,56 @@ final class LiveModel {
         } catch {
             notice = "\(error)"
         }
+    }
+
+    // MARK: - Capability discovery
+
+    private(set) var protocolDescription = ""
+
+    /// True when the ECU answers a basic request, used to validate a pinned
+    /// protocol before trusting it.
+    private func ECUResponds(using elm: ELMClient) async -> Bool {
+        guard let reply = try? await elm.send("0100", timeout: 5),
+              let hex = reply.payloadHex, hex.hasPrefix("4100")
+        else { return false }
+        return true
+    }
+
+    /// Asks which PIDs the vehicle supports. Purely additive: if every probe
+    /// fails, `supportedPIDs` stays empty and nothing is filtered.
+    private func discoverCapabilities(using elm: ELMClient) async {
+        var found: Set<UInt8> = []
+        for base in PIDCapabilities.probePIDs {
+            let command = String(format: "01%02X", base)
+            guard let reply = try? await elm.send(command, timeout: 6),
+                  let hex = reply.payloadHex,
+                  let supported = PIDCapabilities.supported(fromHex: hex, base: base)
+            else { continue }
+            found.formUnion(supported)
+            if supported.isEmpty { break }
+        }
+        supportedPIDs = found
+    }
+
+    /// Profile signals if it has any, otherwise the generic baseline — then
+    /// filtered by what the car actually reports.
+    private func rebuildSignalList() {
+        let base = profile?.signals ?? []
+        let chosen = base.isEmpty ? GenericSignals.defaults : base
+
+        if supportedPIDs.isEmpty {
+            signals = chosen
+            return
+        }
+
+        let filtered = chosen.filter { signal in
+            guard let pid = signal.pidValue else { return false }
+            return supportedPIDs.contains(pid)
+        }
+
+        // Never end up with an empty dashboard just because discovery was odd:
+        // if the filter removes everything, keep the unfiltered set.
+        signals = filtered.isEmpty ? chosen : filtered
     }
 
     // MARK: - Polling
@@ -359,7 +439,7 @@ final class LiveModel {
 
         _ = try? await elm.send("ATSH7E0", timeout: 2)
         let command = String(format: "21%02X", lid)
-        guard let reply = try? await elm.send(command, timeout: 3),
+        guard let reply = try? await elm.send(command, timeout: 6),
               let hex = reply.payloadHex,
               let frame = MUT21Frame(hex: hex)
         else { return }
@@ -388,7 +468,7 @@ final class LiveModel {
         var frames: [UInt8: MUT21Frame] = [:]
         for lid in [UInt8(0x11), 0x12] {
             let command = String(format: "21%02X", lid)
-            guard let reply = try? await elm.send(command, timeout: 3),
+            guard let reply = try? await elm.send(command, timeout: 6),
                   let hex = reply.payloadHex,
                   let frame = MUT21Frame(hex: hex)
             else { continue }

@@ -99,6 +99,25 @@ Values are cached by `lid:name` and only the parameters listed in
 `VehicleProfile.highlightItemNumbers` are shown, keeping the choice reviewable
 rather than inferred from names.
 
+## Graceful degradation
+
+The app must reach a usable state with **any** vehicle that answers an ELM327
+adapter. A missing or wrong profile degrades, it does not fail.
+
+| Situation | Behaviour |
+|---|---|
+| No profile, or profile with no `standard` signals | Generic baseline of classic PIDs is used |
+| Profile pins a protocol the car does not speak | Probe `0100`; on silence fall back to `ATSP0` auto-detect |
+| Car does not support a listed PID | Capability discovery removes it from the dashboard |
+| Capability discovery fails entirely | Nothing is filtered; the full list stays |
+| Profile names no modules | DTC scan falls back to `7E0`/`7E1` |
+| Module does not answer `03`/`07`/`0A` | Scan is marked incomplete; no codes are invented |
+| Adapter has no manufacturer service | Manufacturer sweep is skipped silently |
+
+Nothing in this list reports an error to the user, because none of it is a fault
+the driver can act on. The one exception is a recording write failure, which is
+surfaced because it silently loses data.
+
 ## Extension points
 
 | Want to add | Change |

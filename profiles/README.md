@@ -90,6 +90,11 @@ needed per PID: `value = raw * factor + offset`, read big-endian over `bytes`
 This is what makes the tool work on a car it has never seen: a profile that lists
 PIDs `05`, `0C`, `0D` with their scaling will display them, with no code change.
 
+Both `transport` and `standard` are optional. Without them the app uses a generic
+baseline, auto-detects the protocol, and filters the list to whatever the car
+reports supporting — so an incomplete profile is a degraded result, never a
+broken one.
+
 ### `blocks`
 
 Each block is one request, keyed by its local identifier.
