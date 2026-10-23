@@ -51,6 +51,32 @@ five rail pressures, oil dilution, and rail pressure versus target.
 
 Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/README.md).
 
+### Unverified: which other Mitsubishis might work
+
+Only the 2016 Outlander 2.2 DiD is actually tested. Everything below is inference,
+not measurement — treat it as a starting point for a contribution, not a
+compatibility promise.
+
+| Likelihood | Models | Reasoning |
+|---|---|---|
+| **Most likely** | 4N1-family diesels: ASX 1.8 DiD (4N13), Triton/L200 and Pajero Sport 2.4 DiD (4N15) | Same engine architecture, so the manufacturer service is probably present. The **byte offsets will not be identical.** |
+| **Plausible** | Mitsubishi diesels roughly 2008–2020 supported by MUT-III era diagnostics | The protocol is likely there; the layout almost certainly is not. |
+| **Unlikely to help** | Anything pre-CAN (before ~2008), and the 3.2 DiD Pajero | Earlier generation of diagnostic protocol. |
+
+**Answering the service is not proof the offsets apply.** Even inside the MUT-III
+database used to decode this car, five diesel ECU variants exist and the DPF block
+sits on local identifier `0x11` in some and `0x4C` in others. The app therefore
+requires a calibration-ID, VIN or live-data match before applying a manufacturer
+profile, and falls back to generic OBD when it cannot prove the match.
+
+To find out what an unknown car exposes, no app is needed:
+
+```bash
+cd Probe && ./run.sh --sweep-only --service 21
+```
+
+Two minutes, read-only. Any identifier that answers is a candidate for a profile.
+
 The app picks the profile itself: it asks whether the car answers a manufacturer
 service, reads the calibration ID and VIN, and only applies a manufacturer profile
 when they match. Answering `0x21` is not treated as proof that the offsets apply —
