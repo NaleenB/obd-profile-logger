@@ -334,3 +334,71 @@ final class ManifestProvenanceTests: XCTestCase {
         XCTAssertEqual(read.odometerEndKm, 80_412)
     }
 }
+
+final class ExportAllTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-all-\\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func make(_ id: String) throws -> URL {
+        let recorder = try SessionStore.createSession(
+            root: root,
+            manifest: SessionManifest(sessionID: id, startedAt: WallClock.iso(), appVersion: "t")
+        )
+        try recorder.recordSample(pid: 0x0C, name: "rpm", value: 650, unit: "rpm")
+        recorder.finish(reason: "user")
+        return recorder.directory
+    }
+
+    func testArchiveContainsEverySession() throws {
+        let a = try make("20260101-100000-aaaa")
+        let b = try make("20260101-110000-bbbb")
+
+        let archive = try SessionArchive.exportAll([a, b])
+        defer { SessionArchive.discard(archive) }
+
+        let paths = try SessionArchive.entryPaths(of: archive)
+        XCTAssertTrue(paths.contains { $0.contains("20260101-100000-aaaa/manifest.json") })
+        XCTAssertTrue(paths.contains { $0.contains("20260101-110000-bbbb/manifest.json") })
+        XCTAssertTrue(paths.contains { $0.hasSuffix("samples.ndjson") })
+    }
+
+    func testSourcesAreNotModified() throws {
+        let a = try make("20260101-100000-aaaa")
+        let before = try Data(contentsOf: a.appendingPathComponent("samples.ndjson"))
+
+        let archive = try SessionArchive.exportAll([a])
+        defer { SessionArchive.discard(archive) }
+
+        let after = try Data(contentsOf: a.appendingPathComponent("samples.ndjson"))
+        XCTAssertEqual(before, after)
+    }
+
+    func testEmptyListThrows() {
+        XCTAssertThrowsError(try SessionArchive.exportAll([]))
+    }
+
+    func testStagingIsCleanedUp() throws {
+        let a = try make("20260101-100000-aaaa")
+        let before = Set(
+            try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+                .filter { $0.hasPrefix("obdlogger-staging-") }
+        )
+        let archive = try SessionArchive.exportAll([a])
+        defer { SessionArchive.discard(archive) }
+        let after = Set(
+            try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+                .filter { $0.hasPrefix("obdlogger-staging-") }
+        )
+        XCTAssertEqual(before, after, "staging directories must not accumulate")
+    }
+}

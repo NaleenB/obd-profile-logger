@@ -51,6 +51,33 @@ public enum SessionArchive {
         return produced
     }
 
+    /// One archive containing several sessions, each in its own folder.
+    ///
+    /// Stages copies first so the sources are only ever read, and so the archive
+    /// has a predictable single root rather than a scatter of sibling folders.
+    public static func exportAll(
+        _ sessionDirectories: [URL],
+        containerName: String = "OBDLogger-sessions"
+    ) throws -> URL {
+        guard !sessionDirectories.isEmpty else {
+            throw ArchiveError.failed("there are no sessions to export")
+        }
+
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obdlogger-staging-\(UUID().uuidString)", isDirectory: true)
+        let root = staging.appendingPathComponent(containerName, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        for directory in sessionDirectories {
+            let destination = root.appendingPathComponent(directory.lastPathComponent, isDirectory: true)
+            guard !FileManager.default.fileExists(atPath: destination.path) else { continue }
+            try FileManager.default.copyItem(at: directory, to: destination)
+        }
+
+        return try export(root)
+    }
+
     /// Removes a previously exported archive. Called when the share sheet has
     /// been dismissed, so temporary files do not accumulate.
     public static func discard(_ url: URL) {
@@ -89,6 +116,26 @@ public enum SessionArchive {
             names.append(item.lastPathComponent)
         }
         return names.sorted()
+    }
+    /// Relative paths of every entry, including directories. Lets a test assert
+    /// that each session folder survived the round trip.
+    public static func entryPaths(of archive: URL) throws -> [String] {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unzip-all-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        try FileManager.default.unzipItem(at: archive, to: destination)
+
+        let enumerator = FileManager.default.enumerator(
+            at: destination,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+        var paths: [String] = []
+        while let item = enumerator?.nextObject() as? URL {
+            let relative = item.path.replacingOccurrences(of: destination.path + "/", with: "")
+            paths.append(relative)
+        }
+        return paths.sorted()
     }
     #endif
 }

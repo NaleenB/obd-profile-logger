@@ -14,6 +14,7 @@ struct SessionsView: View {
     @State private var message: String?
     @State private var pendingDelete: SessionSummary?
     @State private var confirmingDeleteAll = false
+    @State private var allExportURL: URL?
 
     init(activeSessionID: String? = nil, onDeleted: @escaping (Set<String>) -> Void = { _ in }) {
         self.activeSessionID = activeSessionID
@@ -86,6 +87,23 @@ struct SessionsView: View {
             Text("Sessions")
                 .font(.title2.weight(.semibold))
             Spacer()
+
+            if let allExportURL {
+                ShareLink(item: allExportURL) {
+                    Label("Share all", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button {
+                    prepareAll()
+                } label: {
+                    Label("Share all", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .disabled(summaries.filter { $0.id != activeSessionID }.isEmpty)
+                .help("One ZIP containing every saved session")
+            }
+
             Button(role: .destructive) {
                 confirmingDeleteAll = true
             } label: {
@@ -180,6 +198,24 @@ struct SessionsView: View {
         }
     }
 
+    /// Every session except the one currently recording: a partial session in a
+    /// shared archive invites misleading conclusions.
+    private func prepareAll() {
+        let exportable = summaries.filter { $0.id != activeSessionID }
+        guard !exportable.isEmpty else {
+            message = "No finished sessions to share."
+            return
+        }
+        do {
+            if let existing = allExportURL { SessionArchive.discard(existing) }
+            allExportURL = try SessionArchive.exportAll(exportable.map(\.directory))
+            message = nil
+        } catch {
+            message = "\(error)"
+            allExportURL = nil
+        }
+    }
+
     private func prepare(_ summary: SessionSummary) {
         do {
             if let existing = exportURL { SessionArchive.discard(existing) }
@@ -217,6 +253,8 @@ struct SessionsView: View {
             selected = nil
             if let exportURL { SessionArchive.discard(exportURL) }
             exportURL = nil
+            if let allExportURL { SessionArchive.discard(allExportURL) }
+            allExportURL = nil
             onDeleted(removing)
             reload()
             message = nil

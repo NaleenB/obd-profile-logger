@@ -154,6 +154,12 @@ gone. Export is unaffected because it only ever reads the source.
 ## Export
 
 `SessionArchive.export` produces a ZIP at a unique temporary path using
-`NSFileCoordinator`'s uploading mode. The source directory is only read. The UI
+`NSFileCoordinator`'s uploading mode.
+
+`SessionArchive.exportAll` does the same for several sessions at once: it stages
+copies under a single root folder and archives that, so the result is
+`OBDLogger-sessions/<session>/…` rather than a scatter of sibling directories.
+Sources are only read. The session currently being recorded is excluded, because
+a partial session in a shared archive invites wrong conclusions. The source directory is only read. The UI
 shares that ZIP through the system share sheet and discards the temporary copy
 afterwards.
