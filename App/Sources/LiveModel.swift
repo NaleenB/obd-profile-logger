@@ -39,6 +39,11 @@ final class LiveModel {
     var lastUpdate: Date? { readings.lastUpdate }
     private(set) var profile: VehicleProfile?
 
+    /// Latest DTC scan, shown in the UI. Updated on every scan; the event stream
+    /// dedupes separately.
+    private(set) var diagnostics: VehicleDiagnostics?
+    private(set) var diagnosticsAt: Date?
+
     var recording: RecordingState = .idle
     var lastSessionURL: URL?
     var exportURL: URL?
@@ -83,9 +88,7 @@ final class LiveModel {
     private var scanner: DTCScanner?
     private var snapshotGate = DTCSnapshotGate()
     private var profileIndex = 0
-    private var sweepAttempted: Set<UInt8> = []
-    private var sweepAnswered: Set<UInt8> = []
-    private var sweepCycles = 0
+    private var sweep = SweepAccountant()
     private var lastDTCStep = Date.distantPast
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
@@ -977,6 +980,9 @@ final class LiveModel {
     }
 
     private func completeScan(_ diagnostics: VehicleDiagnostics, outcomes: [String: String]) {
+        self.diagnostics = diagnostics
+        self.diagnosticsAt = Date()
+
         let signature = DTCSnapshot.signature(diagnostics, outcomes: outcomes)
         guard snapshotGate.shouldEmit(signature) else { return }
 
@@ -1038,30 +1044,31 @@ final class LiveModel {
         let lid = profile.localIdentifiers[profileIndex % count]
         profileIndex += 1
 
-        if profileIndex % count == 0, !sweepAttempted.isEmpty {
-            sweepCycles += 1
-            session.event(.sweepCompleted, [
-                "cycle": String(sweepCycles),
-                "attempted": String(sweepAttempted.count),
-                "answered": String(sweepAnswered.count),
-                "missing": profile.localIdentifiers
-                    .filter { !sweepAttempted.contains($0) }
-                    .map { String(format: "%02X", $0) }
-                    .joined(separator: ",")
-            ])
-            sweepAttempted.removeAll()
+        // The cycle closes as the index wraps, which is after every identifier
+        // has been requested once.
+        if profileIndex % count == 0 {
+            if let summary = sweep.completeCycle(planned: profile.localIdentifiers) {
+                session.event(.sweepCompleted, [
+                    "cycle": String(summary.cycle),
+                    "attempted": String(summary.attempted),
+                    "answered": String(summary.answered),
+                    "missing": summary.missing.map { String(format: "%02X", $0) }.joined(separator: ",")
+                ])
+            }
         }
+
+        // Recorded before the request: a timeout is still an attempt.
+        sweep.recordAttempt(lid)
 
         _ = try? await elm.send("ATSH7E0", timeout: 2)
         let command = String(format: "21%02X", lid)
-        guard let reply = try? await elm.send(command, timeout: 6),
+        guard let reply = try? await elm.send(command, timeout: 3),
               let hex = reply.payloadHex,
               let frame = MUT21Frame(hex: hex)
         else { return }
 
-        sweepAttempted.insert(lid)
+        sweep.recordAnswer(lid)
         let decodedValues = profile.decode(frame)
-        if !decodedValues.isEmpty { sweepAnswered.insert(lid) }
 
         for decoded in decodedValues {
             readings.setManufacturer(decoded, at: Date())

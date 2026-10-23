@@ -18,8 +18,11 @@ Session IDs are UTC timestamps plus a random suffix, so they sort chronologicall
 and two sessions in the same second cannot collide. An existing directory is
 never reused.
 
-NDJSON is canonical. CSV is never written as a source of truth; export produces a
-ZIP of these three files unchanged.
+NDJSON is canonical. CSV is never written as a source of truth. Export archives the
+whole session directory unchanged — `manifest.json`, `samples.ndjson`,
+`events.ndjson`, **and `profile.json`** — so a session remains decodable after the
+app ships a different profile. Sharing everything at once stages the sessions under
+a single `OBDLogger-sessions/` root and archives that.
 
 ## manifest.json
 
@@ -93,8 +96,9 @@ NTP, user change) cannot make session time go backwards.
 ```
 
 Types: `session_started`, `session_stopped`, `adapter_connected`,
-`adapter_disconnected`, `recording_interrupted`, `battery_test`, `data_gap`,
-`data_resumed`, `dtc_snapshot`, `error`.
+`adapter_disconnected`, `adapter_reconnected`, `recording_interrupted`,
+`battery_test`, `data_gap`, `data_resumed`, `regen_started`, `regen_ended`,
+`sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `error`.
 
 `data_gap` / `data_resumed` bracket a stretch where the vehicle stopped
 answering while recording continued — usually ignition off. The adapter stays
@@ -118,9 +122,10 @@ continues the same session, so a walk out of range and back produces one file
 rather than two. If the ten minutes expire the session is stopped with reason
 `reconnect_timeout`.
 
-`adapter_disconnected` during a session means the *link* dropped (out of range,
-unplugged, module reset), which is a different event and stops the recording. Without them a log
-looks like the engine did nothing rather than that the app lost contact.
+`adapter_disconnected` means the *link* dropped (out of range, unplugged, module
+reset). It does **not** by itself stop the recording: the app retries and, if it
+reconnects, continues the same session. The session ends only on an intentional
+disconnect, a reconnect timeout, or the idle rule.
 
 Exactly one `session_started` is written per session, by `RecordingSession.start`,
 with caller metadata merged in. The link is dropped automatically after ten minutes without a successful sample,

@@ -1,7 +1,11 @@
 # First drive — verification checklist
 
 Purpose: prove the recorder, DTC scanner, manufacturer sweep and battery test
-against real hardware. Nothing here has run on a car yet.
+against real hardware.
+
+**Status: completed 2026-10-23.** Three sessions were recorded across macOS and a
+physical iPhone (about 6,000 samples). The items still unproven are listed under
+"What is still unverified" below.
 
 ## Do the first drive on the Mac
 
@@ -66,6 +70,16 @@ TCM", the engine codes are still valid. Do not read it as "the car is clean".
 the engine is off, which is slower than the probe's ~6 Hz. A very short crank
 might be sampled only once. If `crankMinimumVolts` looks implausibly high
 (above 12 V) the dip was missed rather than absent.
+
+## What is still unverified
+
+- The ten-minute idle disconnect has not been observed.
+- The ten-minute reconnect window after a dropped link has not been observed.
+- Regeneration detection has not yet caught a real regeneration.
+- Trigger thresholds for regeneration (450 °C start, 300 °C end) are conventional
+  values, not measured on this car.
+
+Everything else on this page has been exercised on the car.
 
 ## What to send back
 

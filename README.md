@@ -1,9 +1,10 @@
 # OBDLogger
 
 **An ELM327 OBD-II logger for iOS and macOS that also reads manufacturer-specific data.**
-Any car works for standard PIDs and fault codes. A vehicle profile adds the data the
-manufacturer keeps behind a proprietary service — starting with DPF soot and regeneration
-state on a 2016 Mitsubishi Outlander diesel.
+Compatible OBD-II vehicles can use the standard live data and fault codes the adapter
+supports. A vehicle profile adds the data the manufacturer keeps behind a proprietary
+service — starting with DPF soot and regeneration state on a 2016 Mitsubishi Outlander
+diesel.
 
 <img src="docs/images/icon.png" width="112" alt="OBDLogger icon">
 
@@ -47,7 +48,7 @@ five rail pressures, oil dilution, and rail pressure versus target.
 |---|---|---|---|
 | Mitsubishi Outlander 2016, 2.2 DiD (4N14) | yes | yes — 274 parameters | on car |
 | Generic ISO 15765-4 (CAN) — template | yes | none | not yet |
-| Anything else | yes | needs a profile | — |
+| Anything else | depends on protocol and module headers | needs a profile | — |
 
 Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/README.md).
 
@@ -77,19 +78,29 @@ cd Probe && ./run.sh --sweep-only --service 21
 
 Two minutes, read-only. Any identifier that answers is a candidate for a profile.
 
-The app picks the profile itself: it asks whether the car answers a manufacturer
-service, reads the calibration ID and VIN, and only applies a manufacturer profile
-when they match. Answering `0x21` is not treated as proof that the offsets apply —
-several models speak it with completely different block layouts, and a wrong match
-would produce confident nonsense. You can override the choice by hand.
+The app picks the profile itself, by four routes in order of strength:
+
+1. **Calibration ID match** (mode 09 PID 04) — the sharpest test, since byte layouts
+   follow the ECU software version.
+2. **VIN prefix match**, when the calibration ID cannot be read.
+3. **Live-data agreement** — decode "engine speed" from the manufacturer block and
+   check it against the ECU's own rpm over standard OBD. A wrong layout produces a
+   byte that almost never agrees.
+4. **Explicit assumption**, with an on-screen notice, when identity is unreadable,
+   only one specific profile exists, and the engine is not running to allow (3).
+
+Otherwise it falls back to generic OBD. Answering `0x21` is never treated as proof
+that the offsets apply — several models speak it with completely different block
+layouts, and a wrong match would produce confident nonsense. A manual override
+appears in the interface whenever the app is not confident.
 
 ## Quick start
 
-Requires Xcode 15+ and an ELM327 adapter (BLE for iPhone; BLE or USB for Mac).
+Requires Xcode 16+ and an ELM327 adapter (BLE for iPhone; BLE or USB for Mac).
 
 ```bash
 git clone https://github.com/NaleenB/obd-profile-logger.git
-cd OBDLogger
+cd obd-profile-logger
 
 # Discover what your car exposes — no app needed
 cd Probe && ./run.sh
@@ -98,7 +109,7 @@ cd Probe && ./run.sh
 cd ../App && ./run.sh
 
 # Install on a connected iPhone, bumping the version first
-./tools/deploy-ios.sh
+cd .. && ./tools/deploy-ios.sh
 ```
 
 The probe is the fastest way to find out whether a vehicle supports a manufacturer
@@ -165,9 +176,10 @@ simulated.
 | Charging | 14.19–14.27 V |
 | Cranking | 10.38–10.90 V against a 9.5 V health line |
 
-**Not yet verified:** the iOS app has only run in the simulator, and two timing
-behaviours — the ten-minute idle disconnect and data-gap events — have not been
-observed in a real session. See the roadmap in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Verified on hardware:** both platforms. The iOS build has recorded real sessions
+on a physical iPhone, including background recording with the screen locked. Two
+timing behaviours remain unobserved in a real session: the ten-minute idle
+disconnect, and the ten-minute reconnect window after a dropped link. See the roadmap in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Scope and disclaimer
 

@@ -36,6 +36,8 @@ struct ContentView: View {
                 }
             }
 
+            codesLine
+
             if let battery = model.batteryReport, battery.startObserved {
                 batteryLine(battery)
             }
@@ -159,6 +161,50 @@ struct ContentView: View {
         case .idle:
             EmptyView()
         }
+    }
+
+    /// Fault codes, with incompleteness stated rather than glossed over: on this
+    /// car the DPF has no monitor at all, so "no codes" is not a clean bill.
+    @ViewBuilder
+    private var codesLine: some View {
+        if let diagnostics = model.diagnostics {
+            let codes = diagnostics.modules.flatMap(\.allCodes)
+            let incomplete = diagnostics.modulesIncomplete
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: incomplete.isEmpty
+                      ? (codes.isEmpty ? "checkmark.seal" : "exclamationmark.triangle.fill")
+                      : "questionmark.circle")
+                Text(codesSummary(diagnostics))
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(incomplete.isEmpty ? (codes.isEmpty ? Color.secondary : .red) : .orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func codesSummary(_ diagnostics: VehicleDiagnostics) -> String {
+        var parts: [String] = []
+
+        for module in diagnostics.modules {
+            let codes = module.allCodes
+            if !codes.isEmpty {
+                parts.append("\(module.module): " + codes.joined(separator: ", "))
+            } else if !module.isComplete {
+                parts.append("\(module.module): no answer")
+            }
+        }
+
+        if parts.isEmpty {
+            return diagnostics.isComplete
+                ? "No fault codes in \(diagnostics.modules.map(\.module).joined(separator: " or "))"
+                : "Code scan incomplete"
+        }
+        return "Codes — " + parts.joined(separator: " · ")
     }
 
     private func batteryLine(_ report: BatteryReport) -> some View {

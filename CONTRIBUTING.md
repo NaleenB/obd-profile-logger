@@ -64,8 +64,8 @@ Planned, in rough order. Nothing here is committed to a date.
 
 | Item | Notes |
 |---|---|
-| Session history | list past sessions in the app and re-export any of them |
-| Profile-driven standard PIDs | extend the profile schema with a `standard` block so even mode `01` tiles come from JSON |
+| ~~Session history~~ | done — sessions list, per-session export, share-all, delete |
+| ~~Profile-driven standard PIDs~~ | done — both shipped profiles define their own signal list and scaling |
 | ~~Profile picker~~ | done — two profiles ship, chosen from the header |
 | Baseline learning | compare a drive against the car's own normal, not just factory limits |
 | Background recording | keep a session running with the phone locked |
