@@ -34,7 +34,12 @@ public struct SerialPort {
 ///
 /// Deliberately dumb about ELM327 semantics: it moves bytes and reassembles
 /// responses until the `>` prompt. ELM-level parsing lives in ELMClient.
-public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+/// `@unchecked Sendable` is deliberate: mutable state is guarded by `lock`, and
+/// CoreBluetooth callbacks are delivered on the main queue because the manager is
+/// created with `queue: nil`. The two unavoidable `asyncAfter` closures capture
+/// `self` only to finish a scan or time out a command, both of which take the
+/// same lock.
+public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, @unchecked Sendable {
 
     static let fff0 = CBUUID(string: "FFF0")
     static let fff1 = CBUUID(string: "FFF1")

@@ -84,7 +84,6 @@ public final class BatteryMonitor {
     public func ingest(_ sample: VoltageSample) {
         samples.append(sample)
 
-        let previous = phase
         let next = classify(sample)
 
         // Once the engine has been seen running, an RPM below idle means it was
