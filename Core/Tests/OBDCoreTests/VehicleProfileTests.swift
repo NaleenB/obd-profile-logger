@@ -235,20 +235,54 @@ final class ProfileResolutionTests: XCTestCase {
          try profile("profiles/generic/iso15765-can.json")]
     }
 
-    /// A car that answers a manufacturer service gets the specific profile.
-    func testManufacturerAvailableSelectsSpecificProfile() throws {
-        let chosen = ProfileCatalog.automaticID(manufacturerAvailable: true, among: try shipped())
+    private func identity() -> VehicleIdentity {
+        VehicleIdentity(vin: "JMFXLGF6WHZ000651", calibrationID: "1860C97201")
+    }
+
+    /// A car that answers a manufacturer service AND matches gets the specific
+    /// profile.
+    func testMatchingIdentitySelectsSpecificProfile() throws {
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: true, identity: identity(), among: try shipped())
+        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
+    }
+
+    /// The important case: a different Mitsubishi that also answers 0x21 must
+    /// not be given these offsets, because the block layout differs.
+    func testDifferentMitsubishiFallsBackToGeneric() throws {
+        let other = VehicleIdentity(vin: "MMBJNKB40GH000001", calibrationID: "9999999999")
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: true, identity: other, among: try shipped())
+        XCTAssertEqual(chosen, "generic-iso15765-can",
+                       "answering the service is not evidence that the offsets apply")
+    }
+
+    func testCalibrationIDAloneIsEnough() throws {
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: true,
+            identity: VehicleIdentity(calibrationID: "1860C97201"),
+            among: try shipped())
+        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
+    }
+
+    func testVinPrefixAloneIsEnough() throws {
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: true,
+            identity: VehicleIdentity(vin: "JMFXLGF6WHZ000651"),
+            among: try shipped())
         XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
     }
 
     /// A car that does not answer it gets the generic profile, not an error.
     func testManufacturerUnavailableSelectsGeneric() throws {
-        let chosen = ProfileCatalog.automaticID(manufacturerAvailable: false, among: try shipped())
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: false, identity: identity(), among: try shipped())
         XCTAssertEqual(chosen, "generic-iso15765-can")
     }
 
     func testNoProfilesYieldsNothing() {
-        XCTAssertNil(ProfileCatalog.automaticID(manufacturerAvailable: true, among: []))
+        XCTAssertNil(ProfileCatalog.automaticID(
+            manufacturerAvailable: true, identity: identity(), among: []))
     }
 
     /// A generic profile declaring a manufacturer service would be a mistake, so
@@ -256,7 +290,32 @@ final class ProfileResolutionTests: XCTestCase {
     func testGenericProfileIsNotTreatedAsSpecific() throws {
         let profiles = try shipped()
         let specific = try XCTUnwrap(profiles.first { $0.manufacturer != "Generic" })
-        XCTAssertEqual(ProfileCatalog.automaticID(manufacturerAvailable: true, among: [profiles[1], specific]),
+        XCTAssertEqual(ProfileCatalog.automaticID(
+            manufacturerAvailable: true, identity: identity(), among: [profiles[1], specific]),
                        specific.id)
+    }
+}
+
+
+final class VehicleIdentityDecoderTests: XCTestCase {
+
+    /// Captured from the car.
+    func testDecodesVIN() {
+        let vin = VehicleIdentityDecoder.vin(fromHex: "4902014A4D46584C47463657485A303030363531")
+        XCTAssertEqual(vin, "JMFXLGF6WHZ000651")
+    }
+
+    func testDecodesCalibrationID() {
+        let calid = VehicleIdentityDecoder.calibrationID(fromHex: "49040131383630433937323031")
+        XCTAssertEqual(calid, "1860C97201")
+    }
+
+    func testRejectsWrongService() {
+        XCTAssertNil(VehicleIdentityDecoder.vin(fromHex: "410C0A28"))
+        XCTAssertNil(VehicleIdentityDecoder.calibrationID(fromHex: "4902014A4D46"))
+    }
+
+    func testRejectsEmpty() {
+        XCTAssertNil(VehicleIdentityDecoder.vin(fromHex: "4902"))
     }
 }

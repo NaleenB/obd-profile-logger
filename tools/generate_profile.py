@@ -192,6 +192,11 @@ def main():
         "year": 2016,
         "engine": "4N14 2.2 DiD",
         "market": "AU",
+        # Evidence that this car is the one the offsets were verified against.
+        # A different calibration or VIN prefix means different ECU software and
+        # therefore possibly different block layouts.
+        "calibrationIDs": ["1860C97201"],
+        "vinPrefixes": ["JMFXLGF6W"],
         "service": {
             "readByLocalIdentifier": "21",
             "readByIdentifier": None,

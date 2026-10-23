@@ -30,25 +30,41 @@ public enum ProfileCatalog {
 
     /// Which profile to use when the driver has not chosen one.
     ///
-    /// Capability-based rather than VIN-based: if the ECU answers a
-    /// manufacturer service, the profile that declares that service wins;
-    /// otherwise the generic one is used. With more than one manufacturer
-    /// profile this would need VIN or model matching — see the note in
-    /// `docs/architecture.md`.
+    /// Answering a manufacturer service is **not** sufficient evidence: several
+    /// models answer `0x21` with entirely different block layouts, so the same
+    /// offsets would decode to nonsense. A specific profile is only chosen when
+    /// the car's calibration ID or VIN actually matches it. Otherwise the
+    /// generic profile is used and the caller is expected to say why.
     public static func automaticID(
         manufacturerAvailable: Bool,
+        identity: VehicleIdentity = VehicleIdentity(),
         among profiles: [VehicleProfile]
     ) -> String? {
-        if manufacturerAvailable,
-           let specific = profiles.first(where: {
-               $0.service.readByLocalIdentifier != nil && $0.manufacturer != "Generic"
-           }) {
-            return specific.id
+        if manufacturerAvailable {
+            let specific = profiles.first { profile in
+                profile.manufacturer != "Generic" && matches(profile, identity)
+            }
+            if let specific { return specific.id }
         }
         if let generic = profiles.first(where: { $0.manufacturer == "Generic" }) {
             return generic.id
         }
         return profiles.first?.id
+    }
+
+    /// True when the profile declares this car specifically.
+    public static func matches(_ profile: VehicleProfile, _ identity: VehicleIdentity) -> Bool {
+        if let calibrationID = identity.calibrationID,
+           let known = profile.calibrationIDs,
+           known.contains(calibrationID) {
+            return true
+        }
+        if let vin = identity.vin,
+           let prefixes = profile.vinPrefixes,
+           prefixes.contains(where: { !$0.isEmpty && vin.hasPrefix($0) }) {
+            return true
+        }
+        return false
     }
 
     /// Loaded profiles with a human title, skipping any that fail to parse

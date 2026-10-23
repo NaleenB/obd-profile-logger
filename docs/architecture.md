@@ -124,13 +124,23 @@ Selecting a profile is not something a driver should have to think about. The ap
 defaults to **Automatic** and decides at connect time:
 
 1. Send one manufacturer request (`2111` to the engine ECU).
-2. If it answers, use the profile that declares that service.
-3. If it does not, use the generic profile.
+2. Read the VIN (mode `09` PID `02`) and calibration ID (PID `04`).
+3. Use a manufacturer profile **only if** its `calibrationIDs` or `vinPrefixes`
+   match this car.
+4. Otherwise use the generic profile and say so in the UI.
 
-The picker exists as an override. Automatic is capability-based rather than
-VIN-based, which is sufficient while there is one manufacturer profile. With two
-or more, matching would have to use VIN prefixes or model codes — recorded in the
-profile schema as `vinPrefixes` but not yet used.
+**Answering the service is not evidence that the offsets apply.** Service `0x21`
+is a transport: "return block *n*". What block *n* contains is defined by the ECU
+software, not the protocol. The MUT-III database shows five diesel ECU variants
+where the DPF block sits at LID `0x11` on some and `0x4C` on others. A Triton or
+ASX would answer `2111` happily and decode to nonsense under these offsets, which
+is worse than no data because it looks plausible.
+
+Hence identity matching rather than capability matching. A profile with neither
+`calibrationIDs` nor `vinPrefixes` is never auto-selected; it can still be chosen
+by hand, which is the right signal that the driver knows what they are doing.
+
+The picker exists as an override.
 
 ## Extension points
 

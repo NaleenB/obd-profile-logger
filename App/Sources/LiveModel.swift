@@ -101,7 +101,7 @@ final class LiveModel {
         }
     }
 
-    private func resolveProfile(manufacturerAvailable: Bool) {
+    private func resolveProfile(manufacturerAvailable: Bool, identity: VehicleIdentity) {
         guard profileSelection == "auto" else {
             loadProfile(id: profileSelection)
             return
@@ -111,9 +111,28 @@ final class LiveModel {
         }
         let chosen = ProfileCatalog.automaticID(
             manufacturerAvailable: manufacturerAvailable,
+            identity: identity,
             among: all
         )
         loadProfile(id: chosen ?? ProfileCatalog.defaultID)
+
+        // Say so rather than silently decoding nothing useful.
+        if manufacturerAvailable, chosen == "generic-iso15765-can" {
+            notice = "This car answers a manufacturer service, but no profile matches its calibration. Using generic OBD only."
+        }
+    }
+
+    /// VIN and calibration ID, used to decide whether a profile's byte offsets
+    /// apply to this specific ECU.
+    private func readIdentity(using elm: ELMClient) async -> VehicleIdentity {
+        var identity = VehicleIdentity()
+        if let reply = try? await elm.send("0902", timeout: 5), let hex = reply.payloadHex {
+            identity.vin = VehicleIdentityDecoder.vin(fromHex: hex)
+        }
+        if let reply = try? await elm.send("0904", timeout: 5), let hex = reply.payloadHex {
+            identity.calibrationID = VehicleIdentityDecoder.calibrationID(fromHex: hex)
+        }
+        return identity
     }
 
     /// Sends a known manufacturer request and sees whether anything answers.
@@ -259,7 +278,8 @@ final class LiveModel {
                 }
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
-                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable)
+                let identity = await readIdentity(using: client)
+                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable, identity: identity)
 
                 await discoverCapabilities(using: client)
                 rebuildSignalList()

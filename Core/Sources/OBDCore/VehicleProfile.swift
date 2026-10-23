@@ -89,6 +89,12 @@ public struct VehicleProfile: Codable, Equatable {
     public let year: Int
     public let engine: String
     public let market: String?
+    /// Calibration identifiers this profile applies to. The precise way to match
+    /// a profile: byte layouts differ between ECU software versions.
+    public let calibrationIDs: [String]?
+    /// VIN prefixes this profile applies to, as a fallback when the calibration
+    /// ID is unavailable.
+    public let vinPrefixes: [String]?
     public let notes: [String]
     public let service: Service
     public let transport: Transport?
