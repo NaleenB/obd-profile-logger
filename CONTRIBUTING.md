@@ -57,3 +57,22 @@ git diff --check
 If you changed decoding behaviour, add a test using a real captured frame.
 Tests built from the author's own car data have caught every regression in this
 project so far.
+
+## Roadmap
+
+Planned, in rough order. Nothing here is committed to a date.
+
+| Item | Notes |
+|---|---|
+| Session history | list past sessions in the app and re-export any of them |
+| Profile-driven standard PIDs | extend the profile schema with a `standard` block so even mode `01` tiles come from JSON |
+| Profile picker | ship more than one vehicle profile and let the user choose |
+| Baseline learning | compare a drive against the car's own normal, not just factory limits |
+| Background recording | keep a session running with the phone locked |
+| More vehicle profiles | the whole point — see `profiles/README.md` |
+| CI | `swift test` plus app builds on a macOS runner |
+
+## Not in scope
+
+Writing to an ECU, actuator tests, forced regenerations, ABS/SRS/body modules, and
+anything that requires a credential or a manufacturer subscription.
