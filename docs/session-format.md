@@ -82,7 +82,7 @@ NTP, user change) cannot make session time go backwards.
 ## events.ndjson
 
 ```json
-{"schemaVersion":1,"elapsedMs":9004,"wallTime":"2026-10-23T03:21:14Z",
+{"schemaVersion":3,"elapsedMs":9004,"wallTime":"2026-10-23T03:21:14Z",
  "type":"dtc_snapshot","details":{"complete":"true","summary":"No codes in any module"}}
 ```
 
