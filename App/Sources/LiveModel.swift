@@ -626,6 +626,8 @@ final class LiveModel {
 
                 if Task.isCancelled { return }
                 await stepPriorityScan(using: elm)
+                if Task.isCancelled { return }
+                await stepPriorityScan(using: elm)
 
                 if Task.isCancelled { return }
                 await stepProfileScan(using: elm)
