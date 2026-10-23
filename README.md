@@ -70,6 +70,9 @@ cd Probe && ./run.sh
 
 # Or run the app — builds and launches, no Xcode UI needed
 cd ../App && ./run.sh
+
+# Install on a connected iPhone, bumping the version first
+./tools/deploy-ios.sh
 ```
 
 The probe is the fastest way to find out whether a vehicle supports a manufacturer

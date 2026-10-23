@@ -1111,11 +1111,10 @@ final class LiveModel {
 
     // MARK: - Helpers
 
-    /// Shown in the UI so a screenshot is enough to identify the build.
+    /// Shown in the UI so a screenshot identifies the build.
     var versionDescription: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "OBDLogger \(version) (\(build))"
+        return "OBDLogger \(version)"
     }
 
     private static var appVersion: String {
