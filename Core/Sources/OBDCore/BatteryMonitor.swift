@@ -69,6 +69,7 @@ public final class BatteryMonitor {
     private var preCrankVolts: Double?
     private var preCrankBaseline: Double?
     private var chargingRecovered = false
+    private var peakRunningVolts: Double = 0
     private var engineStopped = false
     private var crankMinimum: Double?
     private var crankStartMs: Int?
@@ -119,6 +120,7 @@ public final class BatteryMonitor {
             }
             if engineStopped { return }
             if let start = runningStartMs, sample.atMs - start > 1_000 {
+                peakRunningVolts = max(peakRunningVolts, sample.volts)
                 if sample.volts >= Self.recoveryVolts {
                     if recoveryMs == nil { recoveryMs = sample.atMs - start }
                     chargingRecovered = true
@@ -199,15 +201,32 @@ public final class BatteryMonitor {
 
         if let running = runningVolts() {
             let band = VehicleSpec.chargingVolts
-            let severity: Severity = band.contains(running) ? .ok : .watch
+
+            // Vehicles with a battery current sensor deliberately drop to float
+            // once the battery accepts little current. Settling below the band
+            // after having demonstrably charged is that behaviour, not a fault.
+            let settledAfterCharging = chargingRecovered && peakRunningVolts >= Self.recoveryVolts
+
+            let severity: Severity
+            let message: String
+            if band.contains(running) {
+                severity = .ok
+                message = String(format: "%.2f V while running — charging normally", running)
+            } else if settledAfterCharging {
+                severity = .ok
+                message = String(format: "reached %.1f V then settled at %.2f V — consistent with a battery that is already full (smart charging)",
+                                 peakRunningVolts, running)
+            } else {
+                severity = .watch
+                message = String(format: "%.2f V while running and never above 13.5 V — check the alternator or belt, this is not a battery fault", running)
+            }
+
             findings.append(Finding(
                 key: "running_voltage",
                 label: "Charging voltage",
                 severity: severity,
-                message: severity == .ok
-                    ? String(format: "%.2f V while running — charging normally", running)
-                    : String(format: "%.2f V while running — check the alternator or belt, this is not a battery fault", running),
-                source: .heuristic("13.8-14.5 V with the engine running"),
+                message: message,
+                source: .heuristic("13.8-14.5 V, unless the system demonstrably charges then floats"),
                 observed: running,
                 unit: "V"
             ))

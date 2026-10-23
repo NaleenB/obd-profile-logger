@@ -294,3 +294,37 @@ final class BatteryMonitorShutdownTests: XCTestCase {
         XCTAssertEqual(try! XCTUnwrap(report.crankMinimumVolts), 10.38, accuracy: 0.001)
     }
 }
+
+/// Captured 2026-10-23: alternator reached 13.5 V after 4.3 s, then settled at
+/// 12.60 V — battery current sensor concluding the battery is full.
+final class BatteryMonitorSmartChargingTests: XCTestCase {
+
+    func testSettlingAfterChargingIsNotAFault() {
+        let monitor = BatteryMonitor()
+        let samples: [(Int, Double, Double?)] = [
+            (0, 12.04, 0), (1_000, 10.6, 180), (2_000, 13.9, 700),
+            (5_000, 14.2, 650), (9_000, 13.2, 650), (12_000, 12.6, 650),
+            (20_000, 12.6, 650), (30_000, 12.6, 650)
+        ]
+        for (ms, v, rpm) in samples {
+            monitor.ingest(VoltageSample(atMs: ms, volts: v, rpm: rpm))
+        }
+        let report = monitor.report()
+        let charging = report.findings.first { $0.key == "running_voltage" }
+        XCTAssertEqual(charging?.severity, .ok, "a system that charged then floated is not faulty")
+        XCTAssertTrue(charging?.message.contains("smart charging") == true)
+    }
+
+    /// Never reaching 13.5 V is still a fault.
+    func testNeverChargingIsStillFlagged() {
+        let monitor = BatteryMonitor()
+        let samples: [(Int, Double, Double?)] = [
+            (0, 12.2, 0), (1_000, 10.4, 180), (3_000, 12.3, 650),
+            (15_000, 12.35, 650), (25_000, 12.3, 650)
+        ]
+        for (ms, v, rpm) in samples {
+            monitor.ingest(VoltageSample(atMs: ms, volts: v, rpm: rpm))
+        }
+        XCTAssertEqual(monitor.report().findings.first { $0.key == "running_voltage" }?.severity, .watch)
+    }
+}
