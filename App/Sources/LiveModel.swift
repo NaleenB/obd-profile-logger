@@ -29,13 +29,13 @@ final class LiveModel {
     var phase: Phase = .idle
     var status = "Not connected"
     var adapterName = ""
-    /// Latest value per PID, keyed by two-digit hex.
-    var values: [String: Double] = [:]
+    /// Everything live, cleared as one unit on disconnect.
+    private(set) var readings = LiveReadings()
     var dpf: DPFStatus?
-    var lastUpdate: Date?
 
-    /// Manufacturer parameters decoded through the vehicle profile.
-    private(set) var manufacturer: [String: DecodedParameter] = [:]
+    var values: [String: Double] { readings.values }
+    var manufacturer: [String: DecodedParameter] { readings.manufacturer }
+    var lastUpdate: Date? { readings.lastUpdate }
     private(set) var profile: VehicleProfile?
 
     var recording: RecordingState = .idle
@@ -70,7 +70,7 @@ final class LiveModel {
     private var connectedAt: Date?
 
     private var scanner: DTCScanner?
-    private var lastScanSignature: String?
+    private var snapshotGate = DTCSnapshotGate()
     private var profileIndex = 0
     private var sweepAttempted: Set<UInt8> = []
     private var sweepAnswered: Set<UInt8> = []
@@ -357,6 +357,8 @@ final class LiveModel {
         elm = nil
         phase = .failed("Adapter disconnected: \(reason)")
         status = "Adapter disconnected"
+        readings.clear()
+        dpf = nil
         lastRPM = nil
         lastVolts = nil
         batteryLogged = false
@@ -384,7 +386,7 @@ final class LiveModel {
         elm = nil
         phase = .idle
         status = "Not connected"
-        values = [:]
+        readings.clear()
         dpf = nil
         scanner = nil
     }
@@ -421,6 +423,7 @@ final class LiveModel {
         )
 
         do {
+            snapshotGate.reset()
             try session.start(
                 manifest: manifest,
                 details: ["polledPIDs": signals.map(\.pid).joined(separator: ",")],
@@ -668,8 +671,7 @@ final class LiveModel {
               let value = signal.decode(data)
         else { return }
 
-        values[signal.pid] = value
-        lastUpdate = Date()
+        readings.setStandard(pid: signal.pid, value: value, at: Date())
         reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
 
         // The ECU may have been asleep when we probed. Now that it is answering,
@@ -731,8 +733,7 @@ final class LiveModel {
 
     private func completeScan(_ diagnostics: VehicleDiagnostics, outcomes: [String: String]) {
         let signature = DTCSnapshot.signature(diagnostics, outcomes: outcomes)
-        guard signature != lastScanSignature else { return }
-        lastScanSignature = signature
+        guard snapshotGate.shouldEmit(signature) else { return }
 
         var details: [String: String] = [
             "complete": diagnostics.isComplete ? "true" : "false",
@@ -768,7 +769,7 @@ final class LiveModel {
         guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return }
 
         for decoded in profile.decode(frame) {
-            manufacturer[decoded.id] = decoded
+            readings.setManufacturer(decoded, at: Date())
             if isRecording {
                 let written = session.manufacturerSample(
                     lid: decoded.lid,
@@ -817,7 +818,7 @@ final class LiveModel {
         if !decodedValues.isEmpty { sweepAnswered.insert(lid) }
 
         for decoded in decodedValues {
-            manufacturer[decoded.id] = decoded
+            readings.setManufacturer(decoded, at: Date())
             if isRecording {
                 let written = session.manufacturerSample(
                     lid: decoded.lid,
