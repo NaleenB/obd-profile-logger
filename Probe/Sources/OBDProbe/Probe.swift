@@ -514,49 +514,93 @@ final class Probe {
             if let rpm = await rpmNow(), rpm > 400 { break }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        let idle = await phase("Idle", samples: 8)
+        var idleRPMs: [Double] = []
+        let idleStart = Date()
+        var idleValues: [Double] = []
+        while Date().timeIntervalSince(idleStart) < 8 {
+            let rpm = await rpmNow() ?? 0
+            if rpm > 400 { idleRPMs.append(rpm) }
+            let result = await read(rpm: rpm)
+            if let dp = result.dp { idleValues.append(dp) }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        let idle = idleValues
 
+        // Free-rev window rather than a timed hold: the driver can rev whenever
+        // they like, and any spread in RPM is enough to test the sensor.
         say("")
-        say("  Phase 3 — HOLD THE ENGINE AT ABOUT 2500 RPM until this finishes.")
-        let revved = await phase("Raised RPM", samples: 8)
+        say("  Phase 3 — REV THE ENGINE as you like for 30 seconds.")
+        say("  No need to hold a steady speed. Just raise it a few times.")
+        say("")
+
+        var revSamples: [(rpm: Double, dp: Double)] = []
+        let revStart = Date()
+        while Date().timeIntervalSince(revStart) < 30 {
+            let rpm = await rpmNow() ?? 0
+            let result = await read(rpm: rpm)
+            if let dp = result.dp {
+                revSamples.append((rpm, dp))
+                say(String(format: "    %6.0f rpm   dP %6.2f kPa", rpm, dp))
+            }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+        }
 
         let zero = median(off)
         let atIdle = median(idle)
-        let atRev = median(revved)
+        let idleRPM = idleRPMs.isEmpty ? 0 : median(idleRPMs) ?? 0
+
+        let maxSample = revSamples.max { $0.rpm < $1.rpm }
+        let minSample = revSamples.min { $0.rpm < $1.rpm }
+        let revSpan = (maxSample?.rpm ?? 0) - (minSample?.rpm ?? 0)
 
         rule("Result")
         say(String(format: "  no flow     %@", zero.map { String(format: "%.2f kPa", $0) } ?? "no data"))
-        say(String(format: "  idle        %@", atIdle.map { String(format: "%.2f kPa", $0) } ?? "no data"))
-        say(String(format: "  ~2500 rpm   %@", atRev.map { String(format: "%.2f kPa", $0) } ?? "no data"))
-
-        var notesOut: [String] = []
-        if let zero {
-            let ok = abs(zero) <= 2.5
-            say("  \(ok ? "OK  " : "FAIL") sensor zero within the +-2.5 kPa specification"
-                + (ok ? "" : " — the sensor or its wiring is suspect"))
-            notesOut.append("zero=\(zero)")
-        } else {
-            say("  FAIL no reading with no flow")
+        say(String(format: "  idle        %@  at %.0f rpm",
+                   atIdle.map { String(format: "%.2f kPa", $0) } ?? "no data", idleRPM))
+        if let maxSample {
+            say(String(format: "  highest     %.2f kPa  at %.0f rpm", maxSample.dp, maxSample.rpm))
+            say(String(format: "  lowest      %.2f kPa  at %.0f rpm",
+                       minSample?.dp ?? 0, minSample?.rpm ?? 0))
+            say(String(format: "  rpm range   %.0f", revSpan))
         }
 
-        if let zero, let atRev {
-            let rise = atRev - zero
-            let responds = rise > 0.5
-            say("  \(responds ? "OK  " : "FAIL") rises with exhaust flow (+\(String(format: "%.2f", rise)) kPa)")
-            if !responds {
-                say("        A sensor that does not move with flow cannot produce a soot estimate.")
-                say("        Treat the differential-pressure soot figure as unreliable.")
+        if let zero {
+            let ok = abs(zero) <= 2.5
+            say("  \(ok ? "OK  " : "FAIL") sensor zero within the +-2.5 kPa specification")
+        }
+
+        var verdict = "inconclusive"
+        if revSpan < 300 {
+            say("  n/a  engine speed barely changed (\(Int(revSpan)) rpm)")
+            say("       Without a spread in RPM the flow response cannot be tested.")
+            say("       Re-run and rev the engine whenever convenient during the window.")
+        } else if let maxSample, let minSample {
+            let rise = maxSample.dp - minSample.dp
+            if rise > 0.5 {
+                verdict = "responds"
+                say(String(format: "  OK   rises with exhaust flow (+%.2f kPa)", rise))
+                say("       Sensor and scaling are sound; the low differential-pressure")
+                say("       soot figure reflects the estimator, not a decode fault.")
+            } else {
+                verdict = "flat"
+                say(String(format: "  FAIL flat across %.0f rpm of range", revSpan))
+                say("       A sensor that does not move with flow cannot produce a")
+                say("       soot estimate. Treat that figure as unreliable.")
             }
         }
 
-        vehicle["dpfCheck"] = [
-            "noFlowKPa": zero ?? 0,
-            "idleKPa": atIdle ?? 0,
-            "raisedRPMKPa": atRev ?? 0,
-            "sensorItem": sensor.itemNumber ?? 0,
-            "sootItem": sootDiff.itemNumber ?? 0
-        ]
-        _ = notesOut
+        try? logger.writeJSON("dpf-check.json", [
+            "noFlowKPa": zero as Any,
+            "idleKPa": atIdle as Any,
+            "idleRPM": idleRPM,
+            "maxKPa": maxSample?.dp as Any,
+            "maxRPM": maxSample?.rpm as Any,
+            "rpmSpan": revSpan,
+            "verdict": verdict,
+            "samples": revSamples.map { ["rpm": $0.rpm, "kPa": $0.dp] }
+        ])
+        say("")
+        say("  Written to: \(logger.directory.path)/dpf-check.json")
     }
 
     private func profileParameter(_ profile: VehicleProfile, item: Int) -> VehicleProfile.Parameter? {

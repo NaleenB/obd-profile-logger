@@ -54,10 +54,14 @@ decode fault or a hardware fact. This mode tells you which, in three prompts:
 
 1. Ignition on, engine off — the sensor must read within +-2.5 kPa of zero
 2. Start the engine, idle — the reading should rise
-3. Hold about 2500 rpm — it should rise further with exhaust flow
+3. A 30-second free-rev window — rev whenever you like, no steady speed needed
 
 A sensor that never moves cannot produce a soot estimate, and the
-differential-pressure figure should then be treated as unreliable.
+differential-pressure figure should then be treated as unreliable. If engine
+speed barely changes the run is reported as inconclusive rather than failed,
+because a flat reading at idle proves nothing.
+
+Results are written to `dpf-check.json` in the run directory.
 
 ## Other options
 
