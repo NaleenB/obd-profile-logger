@@ -53,7 +53,7 @@ Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/R
 Requires Xcode 15+ and an ELM327 adapter (BLE for iPhone; BLE or USB for Mac).
 
 ```bash
-git clone https://github.com/NaleenB/OBDLogger.git
+git clone https://github.com/NaleenB/obd-profile-logger.git
 cd OBDLogger
 
 # Discover what your car exposes — no app needed
