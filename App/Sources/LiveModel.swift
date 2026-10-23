@@ -55,6 +55,7 @@ final class LiveModel {
     private(set) var batteryReport: BatteryReport?
     private var batteryLogged = false
     private var runningSince: Date?
+    private var gapMonitor = DataGapMonitor(threshold: 10)
 
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
@@ -152,6 +153,7 @@ final class LiveModel {
                 batteryLogged = false
                 batteryReport = nil
                 runningSince = nil
+                gapMonitor = DataGapMonitor(threshold: 10)
 
                 phase = .connected
                 status = signals.isEmpty ? "Connected — no supported PIDs found" : "Connected"
@@ -242,6 +244,7 @@ final class LiveModel {
             recording = .idle
             return
         }
+        reportGapTransition(gapMonitor.finish(now: Date()))
         let result = session.stop(reason: reason)
         syncRecordingState()
         lastSessionURL = session.directory
@@ -305,6 +308,20 @@ final class LiveModel {
         let report = battery.report()
         batteryReport = report
         session.event(.batteryTest, report.eventDetails)
+    }
+
+    // MARK: - Data gaps
+
+    /// A silent period is recorded, because otherwise a log looks like the
+    /// engine did nothing rather than that the app could not reach it.
+    private func reportGapTransition(_ transition: DataGapMonitor.Transition?) {
+        guard let transition, isRecording else { return }
+        switch transition {
+        case .started(let quietFor):
+            session.event(.dataGap, ["quietSeconds": String(Int(quietFor))])
+        case .ended(let gapSeconds):
+            session.event(.dataResumed, ["gapSeconds": String(Int(gapSeconds))])
+        }
     }
 
     // MARK: - Capability discovery
@@ -413,6 +430,7 @@ final class LiveModel {
 
         values[signal.pid] = value
         lastUpdate = Date()
+        reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
 
         feedBatteryMonitor(pid: pid, value: value)
 

@@ -82,7 +82,12 @@ NTP, user change) cannot make session time go backwards.
 ```
 
 Types: `session_started`, `session_stopped`, `adapter_connected`,
-`adapter_disconnected`, `recording_interrupted`, `dtc_snapshot`, `error`.
+`adapter_disconnected`, `recording_interrupted`, `battery_test`, `data_gap`,
+`data_resumed`, `dtc_snapshot`, `error`.
+
+`data_gap` / `data_resumed` bracket a stretch where the vehicle stopped
+answering while recording continued — usually ignition off. Without them a log
+looks like the engine did nothing rather than that the app lost contact.
 
 Exactly one `session_started` is written per session, by `RecordingSession.start`,
 with caller metadata merged in. Lifecycle events are idempotent: `finish` writes

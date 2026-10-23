@@ -126,6 +126,8 @@ public enum SessionEventType: String, Codable {
     case adapterConnected = "adapter_connected"
     case adapterDisconnected = "adapter_disconnected"
     case recordingInterrupted = "recording_interrupted"
+    case dataGap = "data_gap"
+    case dataResumed = "data_resumed"
     case batteryTest = "battery_test"
     case dtcSnapshot = "dtc_snapshot"
     case error = "error"
