@@ -6,7 +6,10 @@ import Foundation
 /// See `docs/architecture.md` for the contract these types implement.
 public enum SessionSchema {
     /// Bumped when a field's meaning changes, not merely when one is added.
-    public static let version = 1
+    ///
+    /// 2: `pid` became optional so service `0x21` observations can carry a
+    /// local identifier instead.
+    public static let version = 2
 }
 
 public struct SessionManifest: Codable, Equatable {
@@ -53,7 +56,14 @@ public struct SampleRecord: Codable, Equatable {
     public var schemaVersion: Int
     public var elapsedMs: Int
     public var wallTime: String
-    public var pid: String
+    /// Standard OBD PID, when the observation came from mode `01`.
+    public var pid: String?
+    /// Diagnostic service, for manufacturer observations (`"21"`).
+    public var service: String?
+    /// Local identifier within that service.
+    public var lid: String?
+    /// Manufacturer data-list item number, when the profile provides one.
+    public var itemNumber: Int?
     public var name: String
     public var value: Double
     public var unit: String
@@ -75,6 +85,32 @@ public struct SampleRecord: Codable, Equatable {
         self.elapsedMs = elapsedMs
         self.wallTime = wallTime
         self.pid = String(format: "%02X", pid)
+        self.name = name
+        self.value = value
+        self.unit = unit
+        self.raw = raw
+    }
+
+    /// A manufacturer observation from service `0x21`.
+    public init(
+        schemaVersion: Int = SessionSchema.version,
+        elapsedMs: Int,
+        wallTime: String,
+        service: UInt8,
+        lid: UInt8,
+        itemNumber: Int?,
+        name: String,
+        value: Double,
+        unit: String,
+        raw: String? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.elapsedMs = elapsedMs
+        self.wallTime = wallTime
+        self.pid = nil
+        self.service = String(format: "%02X", service)
+        self.lid = String(format: "%02X", lid)
+        self.itemNumber = itemNumber
         self.name = name
         self.value = value
         self.unit = unit

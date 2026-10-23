@@ -3,6 +3,7 @@ import OBDCore
 
 struct ContentView: View {
     @State private var model = LiveModel()
+    @State private var showingSessions = false
 
     private let columns = [GridItem(.adaptive(minimum: 132), spacing: 12)]
 
@@ -41,6 +42,9 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(minWidth: 380, minHeight: 540)
+        .sheet(isPresented: $showingSessions) {
+            SessionsView()
+        }
     }
 
     private var header: some View {
@@ -162,6 +166,11 @@ struct ContentView: View {
             }
 
             HStack(spacing: 12) {
+                Button("Sessions") {
+                    showingSessions = true
+                }
+                .buttonStyle(.bordered)
+
                 Button("Prepare export") {
                     model.exportLastSession()
                 }

@@ -33,32 +33,55 @@ final class DTCScannerTests: XCTestCase {
     ) -> DTCScanner {
         var scanner = DTCScanner(targets: targets)
         var index = 0
-        while case .command = scanner.next() {
+        while case .request = scanner.next() {
             scanner.ingest(responseHex: index < replies.count ? replies[index] : nil)
             index += 1
         }
         return scanner
     }
 
-    /// Command order is ATSH, 0101, 03, 07, 0A per module.
-    private let completeModule: [String?] = ["OK", "4101004C8000", "430301", "4700", "4A00"]
-
-    func testCommandSequencePerModule() {
-        var scanner = DTCScanner(targets: [.init(module: "ECM", header: "7E0")])
-        var commands: [String] = []
-        while case .command(let command) = scanner.next() {
-            commands.append(command)
+    private func requests(_ scanner: inout DTCScanner) -> [DTCScanner.Request] {
+        var out: [DTCScanner.Request] = []
+        while case .request(let request) = scanner.next() {
+            out.append(request)
             scanner.ingest(responseHex: "OK")
         }
-        XCTAssertEqual(commands, ["ATSH7E0", "0101", "03", "07", "0A"])
-        XCTAssertTrue(scanner.isFinished)
+        return out
+    }
+
+    /// Replies for one complete module: monitor, stored, pending, permanent.
+    private let completeModule: [String?] = ["4101004C8000", "430301", "4700", "4A00"]
+
+    func testCommandSequenceCarriesHeaderOnEveryRequest() {
+        var scanner = DTCScanner(targets: [.init(module: "ECM", header: "7E0")])
+        let out = requests(&scanner)
+        XCTAssertEqual(out.map(\.command), ["0101", "03", "07", "0A"])
+        XCTAssertTrue(out.allSatisfy { $0.header == "7E0" })
+        XCTAssertTrue(out.allSatisfy { $0.module == "ECM" })
+    }
+
+    /// The header is part of the request, so interleaving other traffic between
+    /// steps cannot cause a query to go to the wrong module.
+    func testHeaderIsIndependentOfCallerStateBetweenSteps() {
+        var scanner = DTCScanner()
+        var seen: [(String, String)] = []
+        var interleavedHeader = "7DF"
+
+        while case .request(let request) = scanner.next() {
+            // Simulate other traffic resetting addressing before each step.
+            interleavedHeader = "7DF"
+            // The caller must select the request's header immediately before sending.
+            interleavedHeader = request.header
+            seen.append((interleavedHeader, request.command))
+            scanner.ingest(responseHex: nil)
+        }
+
+        XCTAssertEqual(seen.map { $0.0 }, ["7E0", "7E0", "7E0", "7E0", "7E1", "7E1", "7E1", "7E1"])
+        XCTAssertEqual(seen.map { $0.1 }, ["0101", "03", "07", "0A", "0101", "03", "07", "0A"])
     }
 
     func testBothModulesKeepTheirOwnCodes() {
-        let replies: [String?] = [
-            "OK", "4101004C8000", "430301", "4700", "4A00",     // ECM: P0301
-            "OK", "410100000000", "430700", "4700", "4A00"      // TCM: P0700
-        ]
+        let replies: [String?] = completeModule + ["410100000000", "430700", "4700", "4A00"]
         let scanner = scan(replies: replies)
         XCTAssertTrue(scanner.diagnostics.isComplete)
         XCTAssertEqual(scanner.diagnostics.codes(for: "ECM"), ["P0301"])
@@ -67,16 +90,14 @@ final class DTCScannerTests: XCTestCase {
     }
 
     func testSilentModuleMakesScanIncomplete() {
-        let replies: [String?] = completeModule + ["OK", nil, nil, nil, nil]
-        let scanner = scan(replies: replies)
+        let scanner = scan(replies: completeModule + [nil, nil, nil, nil])
         XCTAssertFalse(scanner.diagnostics.isComplete)
         XCTAssertEqual(scanner.diagnostics.modulesIncomplete, ["TCM"])
         XCTAssertEqual(scanner.diagnostics.codes(for: "ECM"), ["P0301"])
     }
 
-    /// "No codes" and "no answer" must not look the same.
     func testEmptyIsDistinguishedFromNoReply() {
-        let replies: [String?] = ["OK", "410100000000", "4300", nil, nil]
+        let replies: [String?] = ["410100000000", "4300", nil, nil]
         let scanner = scan(targets: [.init(module: "ECM", header: "7E0")], replies: replies)
         XCTAssertEqual(scanner.outcomeDetails["ECM.stored"], "empty")
         XCTAssertEqual(scanner.outcomeDetails["ECM.pending"], "no_reply")
@@ -85,23 +106,73 @@ final class DTCScannerTests: XCTestCase {
     }
 
     func testRejectedServiceIsNotTreatedAsEmpty() {
-        let replies: [String?] = ["OK", "4101004C8000", "7F0311", "4700", "4A00"]
+        let replies: [String?] = ["4101004C8000", "7F0311", "4700", "4A00"]
         let scanner = scan(targets: [.init(module: "ECM", header: "7E0")], replies: replies)
         XCTAssertEqual(scanner.outcomeDetails["ECM.stored"], "rejected")
         XCTAssertFalse(scanner.diagnostics.isComplete)
     }
 
     func testMalformedReplyIsNotTreatedAsNoCodes() {
-        let replies: [String?] = ["OK", "4101004C8000", "43", "4700", "4A00"]
+        let replies: [String?] = ["4101004C8000", "43", "4700", "4A00"]
         let scanner = scan(targets: [.init(module: "ECM", header: "7E0")], replies: replies)
         XCTAssertEqual(scanner.outcomeDetails["ECM.stored"], "malformed")
     }
 
     func testPendingCodeIsReported() {
-        let replies: [String?] = ["OK", "410100040000", "4300", "470047", "4A00"]
+        let replies: [String?] = ["410100040000", "4300", "470047", "4A00"]
         let scanner = scan(targets: [.init(module: "ECM", header: "7E0")], replies: replies)
         XCTAssertEqual(scanner.diagnostics.codes(for: "ECM"), ["P0047"])
         XCTAssertEqual(scanner.outcomeDetails["ECM.stored"], "empty")
         XCTAssertEqual(scanner.outcomeDetails["ECM.pending"], "ok")
+    }
+}
+
+final class DTCSnapshotTests: XCTestCase {
+
+    private func diagnostics(mil: Bool?, stored: [String]?, complete: Bool) -> VehicleDiagnostics {
+        VehicleDiagnostics(modules: [
+            ModuleDiagnostics(
+                module: "ECM", header: "7E0",
+                milOn: mil, reportedDTCs: stored?.count,
+                stored: stored,
+                pending: complete ? [] : nil,
+                permanent: complete ? [] : nil
+            )
+        ])
+    }
+
+    func testIdenticalScansProduceIdenticalSignatures() {
+        let a = diagnostics(mil: false, stored: ["P0301"], complete: true)
+        let b = diagnostics(mil: false, stored: ["P0301"], complete: true)
+        let outcomes = ["ECM.stored": "ok"]
+        XCTAssertEqual(
+            DTCSnapshot.signature(a, outcomes: outcomes),
+            DTCSnapshot.signature(b, outcomes: outcomes)
+        )
+    }
+
+    func testOutcomeChangeProducesNewSignature() {
+        let d = diagnostics(mil: false, stored: [], complete: true)
+        let first = DTCSnapshot.signature(d, outcomes: ["ECM.stored": "empty"])
+        let second = DTCSnapshot.signature(d, outcomes: ["ECM.stored": "no_reply"])
+        XCTAssertNotEqual(first, second, "an outcome change must not be swallowed")
+    }
+
+    func testMilChangeProducesNewSignature() {
+        let a = diagnostics(mil: false, stored: [], complete: true)
+        let b = diagnostics(mil: true, stored: [], complete: true)
+        XCTAssertNotEqual(
+            DTCSnapshot.signature(a, outcomes: [:]),
+            DTCSnapshot.signature(b, outcomes: [:])
+        )
+    }
+
+    func testCompletenessChangeProducesNewSignature() {
+        let a = diagnostics(mil: false, stored: [], complete: true)
+        let b = diagnostics(mil: false, stored: [], complete: false)
+        XCTAssertNotEqual(
+            DTCSnapshot.signature(a, outcomes: [:]),
+            DTCSnapshot.signature(b, outcomes: [:])
+        )
     }
 }

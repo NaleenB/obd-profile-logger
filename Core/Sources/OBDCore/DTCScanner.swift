@@ -4,8 +4,14 @@ import Foundation
 ///
 /// A state machine rather than a blocking call, because the OBD transport is
 /// serialised: running a full scan inline would stall live sampling for several
-/// seconds. The caller issues one command per polling iteration, so live reads
+/// seconds. The caller issues one request per polling iteration, so live reads
 /// and the scan interleave.
+///
+/// **Every request carries its target header.** The header is never assumed to
+/// persist between steps: the caller must select it immediately before sending,
+/// because other traffic (live sampling, manufacturer sweeps) resets addressing
+/// in between. A scanner that emitted `ATSH` once per module would silently be
+/// querying whichever module was addressed last.
 ///
 /// Every query keeps its outcome, so "no codes" is never confused with "no
 /// answer" or "this ECU does not support the service".
@@ -20,8 +26,14 @@ public struct DTCScanner {
         }
     }
 
+    public struct Request: Equatable, Sendable {
+        public let module: String
+        public let header: String
+        public let command: String
+    }
+
     public enum Step: Equatable {
-        case command(String)
+        case request(Request)
         case finished
     }
 
@@ -40,16 +52,17 @@ public struct DTCScanner {
         Target(module: "TCM", header: "7E1")
     ]
 
+    private static let queries = ["0101", "03", "07", "0A"]
+
     private let targets: [Target]
     private var moduleIndex = 0
-    private var phase = 0
-    private var pendingModule: String?
-    private var pendingPhase = 0
+    private var queryIndex = 0
+    private var pending: Request?
 
     private var mil: [String: Bool] = [:]
     private var count: [String: Int] = [:]
     private var stored: [String: [String]?] = [:]
-    private var pending: [String: [String]?] = [:]
+    private var pendingCodes: [String: [String]?] = [:]
     private var permanent: [String: [String]?] = [:]
     private var outcomes: [String: Outcome] = [:]
 
@@ -59,53 +72,43 @@ public struct DTCScanner {
 
     public var isFinished: Bool { moduleIndex >= targets.count }
 
-    /// Next command to send, or `.finished`. One request per call.
+    /// Next request, or `.finished`. The caller sends `ATSH<header>` and then
+    /// `command` as one step.
     public mutating func next() -> Step {
         guard moduleIndex < targets.count else { return .finished }
         let target = targets[moduleIndex]
-
-        let command: String
-        switch phase {
-        case 0: command = "ATSH" + target.header
-        case 1: command = "0101"
-        case 2: command = "03"
-        case 3: command = "07"
-        default: command = "0A"
-        }
-
-        pendingModule = target.module
-        pendingPhase = phase
-        return .command(command)
+        let request = Request(
+            module: target.module,
+            header: target.header,
+            command: Self.queries[queryIndex]
+        )
+        pending = request
+        return .request(request)
     }
 
-    /// Feed the raw payload for the command just returned. `nil` means no reply
+    /// Feed the raw payload for the request just returned. `nil` means no reply
     /// or a timeout.
     public mutating func ingest(responseHex: String?) {
-        guard let module = pendingModule else { return }
+        guard let request = pending else { return }
+        pending = nil
         defer {
-            pendingModule = nil
-            phase += 1
-            if phase > 4 {
-                phase = 0
+            queryIndex += 1
+            if queryIndex >= Self.queries.count {
+                queryIndex = 0
                 moduleIndex += 1
             }
         }
 
-        // ATSH only needs an "OK"; nothing to store.
-        guard pendingPhase > 0 else { return }
-
-        if pendingPhase == 1 {
-            applyMonitorStatus(module: module, hex: responseHex)
-            return
+        switch request.command {
+        case "0101":
+            applyMonitorStatus(module: request.module, hex: responseHex)
+        case "03":
+            applyCodes(module: request.module, mode: "stored", hex: responseHex, header: "43")
+        case "07":
+            applyCodes(module: request.module, mode: "pending", hex: responseHex, header: "47")
+        default:
+            applyCodes(module: request.module, mode: "permanent", hex: responseHex, header: "4A")
         }
-
-        let mode: String
-        switch pendingPhase {
-        case 2: mode = "stored"
-        case 3: mode = "pending"
-        default: mode = "permanent"
-        }
-        applyCodes(module: module, mode: mode, hex: responseHex, phase: pendingPhase)
     }
 
     private mutating func applyMonitorStatus(module: String, hex: String?) {
@@ -129,7 +132,7 @@ public struct DTCScanner {
         outcomes["\(module).monitor"] = .ok
     }
 
-    private mutating func applyCodes(module: String, mode: String, hex: String?, phase: Int) {
+    private mutating func applyCodes(module: String, mode: String, hex: String?, header: String) {
         let key = "\(module).\(mode)"
 
         guard let hex else {
@@ -138,14 +141,13 @@ public struct DTCScanner {
             return
         }
         if hex.hasPrefix("7F") {
-            // 7F <service> <NRC>: the ECU refused the request.
             outcomes[key] = .rejected
             setCodes(nil, module: module, mode: mode)
             return
         }
-
-        let header = phase == 2 ? "43" : (phase == 3 ? "47" : "4A")
-        guard hex.hasPrefix(header), let codes = DTCDecoder.codes(fromHex: String(hex.dropFirst(2))) else {
+        guard hex.hasPrefix(header),
+              let codes = DTCDecoder.codes(fromHex: String(hex.dropFirst(header.count)))
+        else {
             outcomes[key] = .malformed
             setCodes(nil, module: module, mode: mode)
             return
@@ -158,7 +160,7 @@ public struct DTCScanner {
     private mutating func setCodes(_ codes: [String]?, module: String, mode: String) {
         switch mode {
         case "stored": stored[module] = codes
-        case "pending": pending[module] = codes
+        case "pending": pendingCodes[module] = codes
         default: permanent[module] = codes
         }
     }
@@ -172,14 +174,13 @@ public struct DTCScanner {
                 milOn: mil[target.module],
                 reportedDTCs: count[target.module],
                 stored: stored[target.module] ?? nil,
-                pending: pending[target.module] ?? nil,
+                pending: pendingCodes[target.module] ?? nil,
                 permanent: permanent[target.module] ?? nil
             )
         }
         return VehicleDiagnostics(modules: modules)
     }
 
-    /// Per-query outcomes, for the event stream.
     public var outcomeDetails: [String: String] {
         outcomes.mapValues(\.rawValue)
     }
@@ -196,5 +197,27 @@ public struct DTCScanner {
             index = next
         }
         return out
+    }
+}
+
+/// Stable fingerprint of a scan, used to decide whether a new snapshot event is
+/// worth writing. Includes everything a reader would care about: MIL state, the
+/// ECU's own count, every code list, completeness, and per-query outcomes.
+public enum DTCSnapshot {
+    public static func signature(_ diagnostics: VehicleDiagnostics,
+                                 outcomes: [String: String]) -> String {
+        var parts: [String] = []
+        for module in diagnostics.modules {
+            let mil = module.milOn.map { $0 ? "1" : "0" } ?? "-"
+            let count = module.reportedDTCs.map(String.init) ?? "-"
+            let stored = module.stored?.joined(separator: ",") ?? "?"
+            let pending = module.pending?.joined(separator: ",") ?? "?"
+            let permanent = module.permanent?.joined(separator: ",") ?? "?"
+            parts.append("\(module.module)|mil=\(mil)|n=\(count)|s=\(stored)|p=\(pending)|x=\(permanent)|c=\(module.isComplete ? 1 : 0)")
+        }
+        for key in outcomes.keys.sorted() {
+            parts.append("o:\(key)=\(outcomes[key] ?? "")")
+        }
+        return parts.joined(separator: ";")
     }
 }

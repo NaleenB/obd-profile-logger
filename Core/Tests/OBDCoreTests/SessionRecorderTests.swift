@@ -133,8 +133,9 @@ final class SessionRecorderTests: XCTestCase {
         let recorder = try SessionStore.createSession(root: root, manifest: manifest())
         try recorder.recordEvent(.sessionStarted)
 
-        XCTAssertTrue(recorder.finish(reason: "user"))
-        XCTAssertFalse(recorder.finish(reason: "user"), "second finish must be a no-op")
+        XCTAssertEqual(recorder.finish(reason: "user"), .completed)
+        XCTAssertEqual(recorder.finish(reason: "user"), .alreadyClosed,
+                       "second finish must be a no-op")
         XCTAssertTrue(recorder.isClosed)
 
         let rows = try lines(recorder.directory, SessionRecorder.eventsFilename())
@@ -210,5 +211,54 @@ final class SessionRecorderTests: XCTestCase {
         _ = try SessionStore.createSession(root: root, manifest: manifest("20260101-110000-bbbb"))
         let ids = SessionStore.sessions(root: root).map(\.lastPathComponent)
         XCTAssertEqual(ids, ["20260101-110000-bbbb", "20260101-100000-aaaa"])
+    }
+}
+
+final class SessionSummaryTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-summary-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func make(_ id: String, finished: Bool, samples: Int) throws -> SessionRecorder {
+        let manifest = SessionManifest(sessionID: id, startedAt: WallClock.iso(), appVersion: "test", adapterName: "Viecar")
+        let recorder = try SessionStore.createSession(root: root, manifest: manifest)
+        for index in 0..<samples {
+            try recorder.recordSample(pid: 0x0C, name: "rpm", value: Double(index), unit: "rpm")
+        }
+        if finished { recorder.finish(reason: "user") }
+        return recorder
+    }
+
+    func testSummariesListNewestFirstWithCounts() throws {
+        _ = try make("20260101-100000-aaaa", finished: true, samples: 3)
+        _ = try make("20260101-110000-bbbb", finished: true, samples: 5)
+
+        let summaries = SessionStore.summaries(root: root)
+        XCTAssertEqual(summaries.map(\.id), ["20260101-110000-bbbb", "20260101-100000-aaaa"])
+        XCTAssertEqual(summaries[0].sampleCount, 5)
+        XCTAssertTrue(summaries[0].finished)
+        XCTAssertEqual(summaries[0].adapterName, "Viecar")
+    }
+
+    /// A session that never finished is shown as incomplete, not hidden.
+    func testUnfinishedSessionIsVisibleAndMarkedIncomplete() throws {
+        _ = try make("20260101-120000-cccc", finished: false, samples: 2)
+        let summaries = SessionStore.summaries(root: root)
+        XCTAssertEqual(summaries.count, 1)
+        XCTAssertFalse(summaries[0].finished)
+        XCTAssertTrue(summaries[0].durationDescription.contains("incomplete"))
+    }
+
+    func testEmptyRootYieldsNothing() {
+        XCTAssertTrue(SessionStore.summaries(root: root).isEmpty)
     }
 }

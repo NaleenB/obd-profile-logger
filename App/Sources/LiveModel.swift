@@ -118,14 +118,13 @@ final class LiveModel {
     var notice: String?
 
     private let transport = BLETransport()
+    private let session = RecordingSession()
     private var elm: ELMClient?
     private var pollTask: Task<Void, Never>?
 
-    private var recorder: SessionRecorder?
     private var scanner: DTCScanner?
-    private var profileIndex = 0
     private var lastScanSignature: String?
-    private var iteration = 0
+    private var profileIndex = 0
     private var lastDTCStep = Date.distantPast
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
@@ -141,13 +140,12 @@ final class LiveModel {
     }
 
     var isConnected: Bool { phase == .connected }
+    var isRecording: Bool { recording.isRecording }
 
-    /// Manufacturer values worth showing, ordered by data-list item number.
     var manufacturerHighlights: [DecodedParameter] {
         guard let profile else { return [] }
         return profile.highlights(from: Array(manufacturer.values))
     }
-    var isRecording: Bool { recording.isRecording }
 
     // MARK: - Connection
 
@@ -180,8 +178,10 @@ final class LiveModel {
                 phase = .connected
                 status = "Connected"
 
+                // Read DPF once for immediate display. Recording is usually not
+                // active yet; the profile sweep records these same LIDs when it is.
                 await readDPF()
-                record(.adapterConnected, ["adapter": adapterName])
+                session.event(.adapterConnected, ["adapter": adapterName])
                 startPolling()
             } catch {
                 phase = .failed("\(error)")
@@ -195,11 +195,11 @@ final class LiveModel {
         pollTask = nil
 
         if isRecording {
-            try? recorder?.recordEvent(.adapterDisconnected, details: ["reason": "user"])
-            try? recorder?.recordEvent(.recordingInterrupted, details: ["reason": "adapter disconnected"])
+            session.event(.adapterDisconnected, ["reason": "user"])
+            session.event(.recordingInterrupted, ["reason": "adapter disconnected"])
             stopRecording(reason: "adapter_disconnected")
         } else {
-            record(.adapterDisconnected, ["reason": "user"])
+            session.event(.adapterDisconnected, ["reason": "user"])
         }
 
         transport.shutdown()
@@ -222,7 +222,7 @@ final class LiveModel {
     }
 
     func startRecording() {
-        guard recorder == nil else { return }
+        guard !isRecording else { return }
 
         let manifest = SessionManifest(
             sessionID: SessionStore.makeSessionID(),
@@ -233,25 +233,23 @@ final class LiveModel {
             adapterIdentifier: transport.adapterIdentifier.isEmpty ? nil : transport.adapterIdentifier,
             supportedPIDs: nil,
             notes: [
-                "Polled signals are a fixed core subset, not a full capability map.",
+                "Standard PIDs plus service 0x21 manufacturer observations.",
                 "DTC scans cover the engine (7E0) and transmission (7E1) only."
             ]
         )
 
         do {
-            let created = try SessionStore.createSession(manifest: manifest)
-            try created.recordEvent(.sessionStarted, details: [
-                "profile": profileID,
+            try session.start(manifest: manifest)
+            syncRecordingState()
+            lastSessionURL = session.directory
+            if let existing = exportURL { SessionArchive.discard(existing) }
+            exportURL = nil
+            notice = nil
+            session.event(.sessionStarted, [
                 "polledPIDs": LiveSignal.allCases
                     .map { String(format: "%02X", $0.rawValue) }
                     .joined(separator: ",")
             ])
-            recorder = created
-            lastSessionURL = created.directory
-            exportURL.map(SessionArchive.discard)
-            exportURL = nil
-            recording = .recording(sessionID: created.sessionID)
-            notice = nil
         } catch {
             recording = .failed("\(error)")
             notice = "\(error)"
@@ -259,19 +257,31 @@ final class LiveModel {
     }
 
     func stopRecording(reason: String) {
-        guard let active = recorder else {
+        guard isRecording else {
             recording = .idle
             return
         }
-        active.finish(reason: reason)
-        recorder = nil
-        lastSessionURL = active.directory
-        recording = .stopped(sessionID: active.sessionID)
+        let result = session.stop(reason: reason)
+        syncRecordingState()
+        lastSessionURL = session.directory
 
-        let samples = SessionStore.lineCount(at: active.directory,
-                                             filename: SessionRecorder.samplesFilename())
-        if samples == 0 {
-            notice = "Session saved with no samples. Nothing was read while recording."
+        if let problem = result.problem {
+            notice = "Session saved with problems: \(problem)"
+        } else {
+            let directory = session.directory
+            let samples = directory.map {
+                SessionStore.lineCount(at: $0, filename: SessionRecorder.samplesFilename())
+            } ?? 0
+            notice = samples == 0 ? "Session saved with no samples." : nil
+        }
+    }
+
+    private func syncRecordingState() {
+        switch session.state {
+        case .idle: recording = .idle
+        case .recording(let id): recording = .recording(sessionID: id)
+        case .stopped(let id): recording = .stopped(sessionID: id)
+        case .failed(let message): recording = .failed(message)
         }
     }
 
@@ -295,8 +305,8 @@ final class LiveModel {
             guard let self, let elm else { return }
 
             while !Task.isCancelled {
-                // DTC scans address 7E0/7E1 directly; restore broadcast before
-                // sampling so live values keep their usual meaning.
+                // Manufacturer and DTC work address modules directly; restore
+                // broadcast before sampling so live values keep their meaning.
                 _ = try? await elm.send("ATSH7DF", timeout: 2)
 
                 for signal in LiveSignal.allCases {
@@ -310,10 +320,18 @@ final class LiveModel {
                 if Task.isCancelled { return }
                 await stepProfileScan(using: elm)
 
+                if case .failed = recording {
+                    // A write failure has stopped the session; keep sampling for
+                    // the UI but stop pretending we are recording.
+                    syncRecordingState()
+                }
+
                 iteration += 1
             }
         }
     }
+
+    private var iteration = 0
 
     /// One live signal. A failed read writes nothing: absence is meaningful.
     private func sample(_ signal: LiveSignal, using elm: ELMClient) async {
@@ -328,19 +346,23 @@ final class LiveModel {
         values[signal] = value
         lastUpdate = Date()
 
-        try? recorder?.recordSample(
-            pid: signal.rawValue,
-            name: signal.title,
-            value: value,
-            unit: signal.unit,
-            raw: hex
-        )
+        if isRecording {
+            let written = session.sample(
+                pid: signal.rawValue,
+                name: signal.title,
+                value: value,
+                unit: signal.unit,
+                raw: hex
+            )
+            if !written { syncRecordingState() }
+        }
     }
 
     // MARK: - DTC scanning
 
-    /// One scanner command per loop, interleaved with live reads, so DTC work
-    /// never stalls sampling.
+    /// One scanner request per loop, with the target header selected immediately
+    /// before it. The header must not be assumed to persist: live sampling
+    /// resets addressing between steps.
     private func stepDTCScan(using elm: ELMClient) async {
         if scanner == nil {
             guard Date().timeIntervalSince(lastDTCStep) >= dtcScanInterval else { return }
@@ -352,21 +374,17 @@ final class LiveModel {
         switch active.next() {
         case .finished:
             scanner = nil
-            _ = try? await elm.send("ATSH7DF", timeout: 2)
-            _ = try? await elm.send("ATAR", timeout: 2)
             completeScan(active.diagnostics, outcomes: active.outcomeDetails)
-        case .command(let command):
-            let reply = try? await elm.send(command, timeout: 3)
+        case .request(let request):
+            _ = try? await elm.send("ATSH" + request.header, timeout: 2)
+            let reply = try? await elm.send(request.command, timeout: 3)
             active.ingest(responseHex: reply?.payloadHex)
             scanner = active
         }
     }
 
     private func completeScan(_ diagnostics: VehicleDiagnostics, outcomes: [String: String]) {
-        let signature = diagnostics.modules
-            .map { "\($0.module):\($0.allCodes.joined(separator: ",")):\($0.isComplete)" }
-            .joined(separator: "|")
-
+        let signature = DTCSnapshot.signature(diagnostics, outcomes: outcomes)
         guard signature != lastScanSignature else { return }
         lastScanSignature = signature
 
@@ -387,13 +405,13 @@ final class LiveModel {
             details["outcome.\(key)"] = value
         }
 
-        record(.dtcSnapshot, details)
+        session.event(.dtcSnapshot, details)
     }
 
     // MARK: - Manufacturer data
 
     /// One local identifier per loop, so 76 blocks refresh in the background
-    /// without ever blocking live sampling.
+    /// without blocking live sampling.
     private func stepProfileScan(using elm: ELMClient) async {
         guard let profile, !profile.localIdentifiers.isEmpty else { return }
         let lid = profile.localIdentifiers[profileIndex % profile.localIdentifiers.count]
@@ -408,6 +426,17 @@ final class LiveModel {
 
         for decoded in profile.decode(frame) {
             manufacturer[decoded.id] = decoded
+            if isRecording {
+                let written = session.manufacturerSample(
+                    lid: decoded.lid,
+                    itemNumber: decoded.itemNumber,
+                    name: decoded.name,
+                    value: decoded.value,
+                    unit: decoded.unit ?? "",
+                    raw: hex
+                )
+                if !written { syncRecordingState() }
+            }
         }
     }
 
@@ -433,16 +462,6 @@ final class LiveModel {
     }
 
     // MARK: - Helpers
-
-    private func record(_ type: SessionEventType, _ details: [String: String] = [:]) {
-        guard let recorder, !recorder.isClosed else { return }
-        do {
-            try recorder.recordEvent(type, details: details)
-        } catch {
-            notice = "Recording error: \(error)"
-            recording = .failed("\(error)")
-        }
-    }
 
     private static var appVersion: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"

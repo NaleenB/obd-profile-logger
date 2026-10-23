@@ -85,6 +85,18 @@ public final class SessionRecorder {
         lock.unlock()
     }
 
+    /// Manufacturer observation. The elapsed time and wall clock are stamped
+    /// here so every record uses the recorder's own monotonic origin.
+    public func recordManufacturerSample(_ record: SampleRecord) throws {
+        var stamped = record
+        stamped.elapsedMs = clock.nowMs()
+        stamped.wallTime = WallClock.iso()
+        try append(stamped, to: sampleHandle)
+        lock.lock()
+        sampleCount += 1
+        lock.unlock()
+    }
+
     // MARK: - Events
 
     public func recordEvent(_ type: SessionEventType, details: [String: String] = [:]) throws {
@@ -104,16 +116,25 @@ public final class SessionRecorder {
 
     /// Writes the stop event and closes the handles. Idempotent: calling twice
     /// does not produce a second stop event.
+    ///
+    /// Reports whether finalisation actually succeeded. Cleanup stays
+    /// best-effort, but a partial session is never reported as complete.
     @discardableResult
-    public func finish(reason: String) -> Bool {
+    public func finish(reason: String) -> FinalizeResult {
         lock.lock()
         guard !closed else {
             lock.unlock()
-            return false
+            return .alreadyClosed
         }
         lock.unlock()
 
-        try? recordEvent(.sessionStopped, details: ["reason": reason])
+        var problems: [String] = []
+
+        do {
+            try recordEvent(.sessionStopped, details: ["reason": reason])
+        } catch {
+            problems.append("stop event: \(error)")
+        }
 
         lock.lock()
         closed = true
@@ -121,18 +142,22 @@ public final class SessionRecorder {
         let events = eventCount
         lock.unlock()
 
-        try? sampleHandle.synchronize()
-        try? eventHandle.synchronize()
+        if (try? sampleHandle.synchronize()) == nil { problems.append("samples not flushed") }
+        if (try? eventHandle.synchronize()) == nil { problems.append("events not flushed") }
         try? sampleHandle.close()
         try? eventHandle.close()
 
         manifest.finishedAt = WallClock.iso()
         manifest.notes.append("sampleCount=\(samples)")
         manifest.notes.append("eventCount=\(events)")
-        if let data = try? JSONEncoder.pretty.encode(manifest) {
-            try? data.write(to: directory.appendingPathComponent(Self.manifestFilename()))
+        do {
+            let data = try JSONEncoder.pretty.encode(manifest)
+            try data.write(to: directory.appendingPathComponent(Self.manifestFilename()))
+        } catch {
+            problems.append("manifest: \(error)")
         }
-        return true
+
+        return problems.isEmpty ? .completed : .incomplete(problems.joined(separator: "; "))
     }
 
     public var isClosed: Bool {
@@ -155,6 +180,21 @@ public final class SessionRecorder {
         } catch {
             throw RecorderError.writeFailed(error.localizedDescription)
         }
+    }
+}
+
+public enum FinalizeResult: Equatable {
+    case completed
+    case alreadyClosed
+    /// The session was closed but something could not be written. The directory
+    /// is still usable; it is just not guaranteed complete.
+    case incomplete(String)
+
+    public var isComplete: Bool { self == .completed }
+
+    public var problem: String? {
+        if case .incomplete(let message) = self { return message }
+        return nil
     }
 }
 
