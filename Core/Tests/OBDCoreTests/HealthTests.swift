@@ -114,3 +114,33 @@ final class HealthTests: XCTestCase {
         XCTAssertEqual(HealthEvaluator.worst([]), .insufficientData)
     }
 }
+
+final class BatteryTests: XCTestCase {
+
+    private func set(volts: Double) -> ReadingSet {
+        var s = ReadingSet()
+        s.set(PID.moduleVoltage, volts, unit: "V")
+        return s
+    }
+
+    func testHealthyRestingBattery() {
+        let f = HealthEvaluator.evaluateBatteryResting(set(volts: 12.5))
+        XCTAssertEqual(f.first?.severity, .ok)
+    }
+
+    /// The car read 11.5 V with ignition on. That should be flagged.
+    func testObserved11_5VoltsIsSuspect() {
+        let f = HealthEvaluator.evaluateBatteryResting(set(volts: 11.5))
+        XCTAssertEqual(f.first?.severity, .suspect)
+        XCTAssertEqual(f.first?.key, "battery_resting")
+    }
+
+    func testMarginalVoltageIsWatch() {
+        let f = HealthEvaluator.evaluateBatteryResting(set(volts: 12.1))
+        XCTAssertEqual(f.first?.severity, .watch)
+    }
+
+    func testNoReadingProducesNoFinding() {
+        XCTAssertTrue(HealthEvaluator.evaluateBatteryResting(ReadingSet()).isEmpty)
+    }
+}

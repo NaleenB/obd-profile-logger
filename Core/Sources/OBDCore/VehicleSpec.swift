@@ -110,6 +110,11 @@ public enum VehicleSpec {
     /// conventional 12 V alternator band.
     public static let chargingVolts: ClosedRange<Double> = 13.5...14.8
 
+    /// Resting voltage, engine off. A healthy lead-acid battery sits here.
+    /// Below `restingVoltsSuspect` it is on the way out.
+    public static let restingVoltsHealthy: ClosedRange<Double> = 12.2...12.9
+    public static let restingVoltsSuspect: Double = 12.0
+
     /// Convert g/s from PID 0x10 into mg per cylinder per stroke.
     /// Four cylinders, four-stroke: intake events per second = rpm / 30.
     public static func airFlowMgPerCylinder(gramsPerSecond: Double, rpm: Double) -> Double? {
@@ -235,6 +240,46 @@ public enum HealthEvaluator {
         }
 
         return findings
+    }
+
+    /// Battery health, engine off. This is the check that catches a battery
+    /// degrading weeks before it strands the car.
+    public static func evaluateBatteryResting(_ set: ReadingSet) -> [Finding] {
+        guard let volts = set[PID.moduleVoltage] else { return [] }
+
+        if VehicleSpec.restingVoltsHealthy.contains(volts) {
+            return [Finding(
+                key: "battery_resting",
+                label: "Battery at rest",
+                severity: .ok,
+                message: String(format: "%.1f V — healthy", volts),
+                source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
+                observed: volts,
+                unit: "V"
+            )]
+        }
+
+        if volts < VehicleSpec.restingVoltsSuspect {
+            return [Finding(
+                key: "battery_resting",
+                label: "Battery at rest",
+                severity: .suspect,
+                message: String(format: "%.1f V — below 12.0 V, battery is degrading", volts),
+                source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
+                observed: volts,
+                unit: "V"
+            )]
+        }
+
+        return [Finding(
+            key: "battery_resting",
+            label: "Battery at rest",
+            severity: .watch,
+            message: String(format: "%.1f V — below the healthy 12.2-12.9 V band", volts),
+            source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
+            observed: volts,
+            unit: "V"
+        )]
     }
 
     /// Convenience: everything currently known to be checkable.
