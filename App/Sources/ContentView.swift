@@ -91,11 +91,23 @@ struct ContentView: View {
 
     private var profileMenu: some View {
         Menu {
+            Button {
+                model.selectProfile("auto")
+            } label: {
+                if model.profileSelection == "auto" {
+                    Label("Automatic", systemImage: "checkmark")
+                } else {
+                    Text("Automatic")
+                }
+            }
+
+            Divider()
+
             ForEach(model.availableProfiles) { entry in
                 Button {
                     model.selectProfile(entry.id)
                 } label: {
-                    if entry.id == model.profileID {
+                    if entry.id == model.profileSelection {
                         Label(entry.title, systemImage: "checkmark")
                     } else {
                         Text(entry.title)

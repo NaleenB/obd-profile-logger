@@ -28,6 +28,29 @@ public enum ProfileCatalog {
         try VehicleProfileLoader.load(named: id, in: bundle)
     }
 
+    /// Which profile to use when the driver has not chosen one.
+    ///
+    /// Capability-based rather than VIN-based: if the ECU answers a
+    /// manufacturer service, the profile that declares that service wins;
+    /// otherwise the generic one is used. With more than one manufacturer
+    /// profile this would need VIN or model matching — see the note in
+    /// `docs/architecture.md`.
+    public static func automaticID(
+        manufacturerAvailable: Bool,
+        among profiles: [VehicleProfile]
+    ) -> String? {
+        if manufacturerAvailable,
+           let specific = profiles.first(where: {
+               $0.service.readByLocalIdentifier != nil && $0.manufacturer != "Generic"
+           }) {
+            return specific.id
+        }
+        if let generic = profiles.first(where: { $0.manufacturer == "Generic" }) {
+            return generic.id
+        }
+        return profiles.first?.id
+    }
+
     /// Loaded profiles with a human title, skipping any that fail to parse
     /// rather than failing the whole catalogue.
     public static func entries(bundle: Bundle = .main) -> [Entry] {

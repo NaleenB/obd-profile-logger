@@ -118,6 +118,20 @@ Nothing in this list reports an error to the user, because none of it is a fault
 the driver can act on. The one exception is a recording write failure, which is
 surfaced because it silently loses data.
 
+## Profile selection
+
+Selecting a profile is not something a driver should have to think about. The app
+defaults to **Automatic** and decides at connect time:
+
+1. Send one manufacturer request (`2111` to the engine ECU).
+2. If it answers, use the profile that declares that service.
+3. If it does not, use the generic profile.
+
+The picker exists as an override. Automatic is capability-based rather than
+VIN-based, which is sufficient while there is one manufacturer profile. With two
+or more, matching would have to use VIN prefixes or model codes — recorded in the
+profile schema as `vinPrefixes` but not yet used.
+
 ## Extension points
 
 | Want to add | Change |

@@ -70,24 +70,60 @@ final class LiveModel {
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
     private let dtcScanInterval: TimeInterval = 10
-    /// Identifier of the profile in use. Persisted so the choice survives relaunch.
-    private(set) var profileID: String =
-        UserDefaults.standard.string(forKey: "profileID") ?? ProfileCatalog.defaultID
+    /// "auto" or an explicit profile id. Persisted so the choice survives a
+    /// relaunch. Automatic is the default: most drivers should never need this.
+    private(set) var profileSelection: String =
+        UserDefaults.standard.string(forKey: "profileSelection") ?? "auto"
+
+    /// Identifier actually in use after resolution. Goes into the manifest.
+    private(set) var profileID: String = ProfileCatalog.defaultID
 
     /// Profiles bundled with the app, for the picker.
     let availableProfiles = ProfileCatalog.entries()
 
+    /// True when the car answered a manufacturer service at connect time.
+    private(set) var manufacturerServiceAvailable = false
+
     init() {
-        loadProfile()
+        // Before connecting there is nothing to detect, so show the explicit
+        // choice if there is one, otherwise the default.
+        let initial = profileSelection == "auto" ? ProfileCatalog.defaultID : profileSelection
+        loadProfile(id: initial)
     }
 
-    private func loadProfile() {
+    private func loadProfile(id: String) {
+        profileID = id
         do {
-            profile = try ProfileCatalog.load(id: resourceName(for: profileID))
+            profile = try ProfileCatalog.load(id: resourceName(for: id))
         } catch {
             profile = nil
             notice = "Vehicle profile unavailable: \(error)"
         }
+    }
+
+    private func resolveProfile(manufacturerAvailable: Bool) {
+        guard profileSelection == "auto" else {
+            loadProfile(id: profileSelection)
+            return
+        }
+        let all = availableProfiles.compactMap {
+            try? ProfileCatalog.load(id: resourceName(for: $0.id))
+        }
+        let chosen = ProfileCatalog.automaticID(
+            manufacturerAvailable: manufacturerAvailable,
+            among: all
+        )
+        loadProfile(id: chosen ?? ProfileCatalog.defaultID)
+    }
+
+    /// Sends a known manufacturer request and sees whether anything answers.
+    /// One command, so it costs about a tenth of a second.
+    private func detectManufacturerService(using elm: ELMClient) async -> Bool {
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        let reply = try? await elm.send("2111", timeout: 3)
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        guard let hex = reply?.payloadHex else { return false }
+        return hex.hasPrefix("6111")
     }
 
     /// Profile ids are dotted and human-readable; bundle resources are the short
@@ -100,20 +136,24 @@ final class LiveModel {
         }
     }
 
-    /// Switching profiles takes effect on the next connection: the protocol,
-    /// signal list and module headers are all fixed at connect time.
+    /// "auto" or a profile id. Takes effect on the next connection: the
+    /// protocol, signal list and module headers are fixed at connect time.
     func selectProfile(_ id: String) {
-        guard id != profileID else { return }
-        profileID = id
-        UserDefaults.standard.set(id, forKey: "profileID")
-        loadProfile()
+        guard id != profileSelection else { return }
+        profileSelection = id
+        UserDefaults.standard.set(id, forKey: "profileSelection")
+        if id != "auto" { loadProfile(id: id) }
         if isConnected {
-            notice = "Reconnect to apply the \(profile?.model ?? "new") profile."
+            notice = "Reconnect to apply the new profile."
         }
     }
 
     var profileTitle: String {
-        availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
+        if profileSelection == "auto" {
+            let resolved = availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
+            return isConnected ? "Auto · \(resolved)" : "Auto"
+        }
+        return availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
     }
 
     var isConnected: Bool { phase == .connected }
@@ -217,6 +257,9 @@ final class LiveModel {
                 } else {
                     _ = try? await client.send("ATSP0", timeout: 3)
                 }
+
+                manufacturerServiceAvailable = await detectManufacturerService(using: client)
+                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable)
 
                 await discoverCapabilities(using: client)
                 rebuildSignalList()

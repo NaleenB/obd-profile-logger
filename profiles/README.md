@@ -90,6 +90,10 @@ needed per PID: `value = raw * factor + offset`, read big-endian over `bytes`
 This is what makes the tool work on a car it has never seen: a profile that lists
 PIDs `05`, `0C`, `0D` with their scaling will display them, with no code change.
 
+The app chooses a profile automatically: if the car answers the manufacturer
+service declared here, this profile is used; otherwise the generic one is. The
+picker is an override, not a requirement.
+
 Both `transport` and `standard` are optional. Without them the app uses a generic
 baseline, auto-detects the protocol, and filters the list to whatever the car
 reports supporting — so an incomplete profile is a degraded result, never a

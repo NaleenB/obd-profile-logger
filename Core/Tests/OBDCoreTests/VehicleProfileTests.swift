@@ -219,3 +219,44 @@ final class GenericProfileTests: XCTestCase {
         }
     }
 }
+
+final class ProfileResolutionTests: XCTestCase {
+
+    private func profile(_ relative: String) throws -> VehicleProfile {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(relative)
+        return try VehicleProfileLoader.load(from: url)
+    }
+
+    private func shipped() throws -> [VehicleProfile] {
+        [try profile("profiles/mitsubishi/outlander-2016-4n14.json"),
+         try profile("profiles/generic/iso15765-can.json")]
+    }
+
+    /// A car that answers a manufacturer service gets the specific profile.
+    func testManufacturerAvailableSelectsSpecificProfile() throws {
+        let chosen = ProfileCatalog.automaticID(manufacturerAvailable: true, among: try shipped())
+        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
+    }
+
+    /// A car that does not answer it gets the generic profile, not an error.
+    func testManufacturerUnavailableSelectsGeneric() throws {
+        let chosen = ProfileCatalog.automaticID(manufacturerAvailable: false, among: try shipped())
+        XCTAssertEqual(chosen, "generic-iso15765-can")
+    }
+
+    func testNoProfilesYieldsNothing() {
+        XCTAssertNil(ProfileCatalog.automaticID(manufacturerAvailable: true, among: []))
+    }
+
+    /// A generic profile declaring a manufacturer service would be a mistake, so
+    /// the resolver must not treat it as specific.
+    func testGenericProfileIsNotTreatedAsSpecific() throws {
+        let profiles = try shipped()
+        let specific = try XCTUnwrap(profiles.first { $0.manufacturer != "Generic" })
+        XCTAssertEqual(ProfileCatalog.automaticID(manufacturerAvailable: true, among: [profiles[1], specific]),
+                       specific.id)
+    }
+}
