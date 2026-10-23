@@ -2,19 +2,18 @@ import SwiftUI
 import OBDCore
 
 struct SessionsView: View {
-    /// The session currently being recorded: never deletable.
+    /// The session currently being recorded: never deletable, never exported.
     let activeSessionID: String?
-    /// Receives the IDs that were removed so the caller can drop references.
     let onDeleted: (Set<String>) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var summaries: [SessionSummary] = []
     @State private var selected: SessionSummary?
     @State private var exportURL: URL?
+    @State private var allExportURL: URL?
     @State private var message: String?
     @State private var pendingDelete: SessionSummary?
     @State private var confirmingDeleteAll = false
-    @State private var allExportURL: URL?
 
     init(activeSessionID: String? = nil, onDeleted: @escaping (Set<String>) -> Void = { _ in }) {
         self.activeSessionID = activeSessionID
@@ -26,35 +25,36 @@ struct SessionsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-
-            if summaries.isEmpty {
-                ContentUnavailableView(
-                    "No sessions yet",
-                    systemImage: "record.circle",
-                    description: Text("Connect to an adapter and a session starts automatically.")
-                )
-            } else {
-                List(summaries) { summary in
-                    row(summary)
-                        .contentShape(Rectangle())
-                        .onTapGesture { selected = summary }
-                        .listRowBackground(
-                            selected?.id == summary.id
-                                ? Color.accentColor.opacity(0.15)
-                                : Color.clear
-                        )
+        NavigationStack {
+            VStack(spacing: 0) {
+                content
+                Divider()
+                footer
+            }
+            .navigationTitle("Sessions")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button(role: .destructive) {
+                            confirmingDeleteAll = true
+                        } label: {
+                            Label("Delete all", systemImage: "trash")
+                        }
+                        .disabled(deletableSessions.isEmpty)
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
                 }
             }
-
-            Divider()
-            footer
         }
+        .frame(minWidth: 320)
         #if os(macOS)
-        // A comfortable sheet on a desktop window; meaningless on a phone, where
-        // it would push the content wider than the screen.
         .frame(minWidth: 480, minHeight: 440)
         #endif
         .onAppear { reload() }
@@ -82,37 +82,29 @@ struct SessionsView: View {
         }
     }
 
-    private var header: some View {
-        HStack {
-            Text("Sessions")
-                .font(.title2.weight(.semibold))
-            Spacer()
+    // MARK: - Content
 
-            if let allExportURL {
-                ShareLink(item: allExportURL) {
-                    Label("Share all", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.bordered)
-            } else {
-                Button {
-                    prepareAll()
-                } label: {
-                    Label("Share all", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.bordered)
-                .disabled(summaries.filter { $0.id != activeSessionID }.isEmpty)
-                .help("One ZIP containing every saved session")
+    @ViewBuilder
+    private var content: some View {
+        if summaries.isEmpty {
+            ContentUnavailableView(
+                "No sessions yet",
+                systemImage: "record.circle",
+                description: Text("Connect to an adapter and a session starts automatically.")
+            )
+            .frame(maxHeight: .infinity)
+        } else {
+            List(summaries) { summary in
+                row(summary)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selected = summary }
+                    .listRowBackground(
+                        selected?.id == summary.id
+                            ? Color.accentColor.opacity(0.15)
+                            : Color.clear
+                    )
             }
-
-            Button(role: .destructive) {
-                confirmingDeleteAll = true
-            } label: {
-                Label("Delete all", systemImage: "trash")
-            }
-            .disabled(deletableSessions.isEmpty)
-            Button("Done") { dismiss() }
         }
-        .padding()
     }
 
     private func row(_ summary: SessionSummary) -> some View {
@@ -148,16 +140,18 @@ struct SessionsView: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
-                .help("Delete this session")
+                .accessibilityLabel("Delete \(summary.id)")
             }
         }
         .padding(.vertical, 2)
     }
 
+    // MARK: - Footer
+
     private var footer: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 12) {
-                if let selected {
+            if let selected {
+                HStack(spacing: 12) {
                     Text(selected.id)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -171,11 +165,30 @@ struct SessionsView: View {
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                } else {
+                }
+            } else {
+                // Nothing selected: offer the whole set in one click, which is
+                // the common case after a drive.
+                HStack(spacing: 12) {
                     Text("Select a session to export")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Spacer()
+                    if let allExportURL {
+                        ShareLink(item: allExportURL) {
+                            Label("Share all", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button {
+                            prepareAll()
+                        } label: {
+                            Label("Share all", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(deletableSessions.isEmpty)
+                    }
                 }
             }
 
@@ -198,8 +211,6 @@ struct SessionsView: View {
         }
     }
 
-    /// Every session except the one currently recording: a partial session in a
-    /// shared archive invites misleading conclusions.
     private func prepareAll() {
         let exportable = summaries.filter { $0.id != activeSessionID }
         guard !exportable.isEmpty else {
