@@ -30,10 +30,11 @@ caffeinate -dimsu
    triggers a macOS Bluetooth permission prompt — allow it. Wait for tiles to
    show values.
 2. Confirm the DPF line appears (soot, regeneration count).
-3. Press **Record**.
+3. Recording starts automatically on connect.
 4. Start the engine. This is the battery test — it should register a crank.
 5. Drive for at least 10 minutes, including some load and a stop.
-6. Press **Stop**.
+6. Close the connection, or switch the ignition off and wait — the app
+   disconnects itself after ten minutes of silence.
 7. Press **Prepare export**, then **Share ZIP** and save it somewhere you can
    open.
 

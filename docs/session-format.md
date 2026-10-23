@@ -1,5 +1,9 @@
 # Session format
 
+A session begins when the adapter connects and ends when it disconnects. There is
+no separate Record button: connecting is the intent to record. A connection that
+produces no samples still yields a session, which is useful evidence in itself.
+
 One directory per recording, under Application Support:
 
 ```
@@ -95,7 +99,12 @@ unplugged, module reset), which is a different event and stops the recording. Wi
 looks like the engine did nothing rather than that the app lost contact.
 
 Exactly one `session_started` is written per session, by `RecordingSession.start`,
-with caller metadata merged in. Lifecycle events are idempotent: `finish` writes
+with caller metadata merged in. The link is dropped automatically after ten minutes without a successful sample,
+so a session left running with the ignition off does not sit open forever. That
+is recorded as `adapter_disconnected` with `reason: idle_timeout`. Quitting the
+app writes `session_stopped` with `reason: app_quit`.
+
+Lifecycle events are idempotent: `finish` writes
 at most one `session_stopped`, and a repeated stop is a no-op.
 
 ### DTC snapshots

@@ -69,11 +69,12 @@ service at all: `./run.sh --sweep-only --service 21`.
 ## What it does
 
 - **Live data** over BLE, with a profile-driven manufacturer panel
-- **Recording** to append-only NDJSON: one line per successful observation, each with
-  its own monotonic timestamp, plus a manifest and an event stream
+- **Automatic recording** on connect, to append-only NDJSON: one line per successful
+  observation, each with its own monotonic timestamp, plus a manifest and events
 - **DTC scanning** with per-module attribution, distinguishing "no codes" from
   "did not answer"
 - **Battery test** across every start: cranking minimum, recovery time, charging voltage
+- **Idle disconnect** after ten minutes without data, so a parked session closes itself
 - **ZIP export** through the system share sheet
 
 ## Design principles

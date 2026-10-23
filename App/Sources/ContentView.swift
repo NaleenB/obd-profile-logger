@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 import OBDCore
 
 struct ContentView: View {
@@ -56,6 +59,11 @@ struct ContentView: View {
         .sheet(isPresented: $showingSessions) {
             SessionsView()
         }
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            model.prepareForTermination()
+        }
+        #endif
     }
 
     private var header: some View {
@@ -183,12 +191,6 @@ struct ContentView: View {
                 .controlSize(.large)
                 .disabled(model.phase == .connecting)
 
-                Button(model.isRecording ? "Stop" : "Record") {
-                    model.toggleRecording()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(!model.isConnected || !canRecord)
             }
 
             HStack(spacing: 12) {
@@ -213,10 +215,6 @@ struct ContentView: View {
         }
     }
 
-    private var canRecord: Bool {
-        if case .failed = model.recording { return false }
-        return true
-    }
 }
 
 private struct Tile: View {

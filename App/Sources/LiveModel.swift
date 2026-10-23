@@ -57,6 +57,8 @@ final class LiveModel {
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
     private var intentionalDisconnect = false
+    private let watchdog = IdleWatchdog(timeout: 600)
+    private var connectedAt: Date?
 
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
@@ -161,6 +163,7 @@ final class LiveModel {
                 runningSince = nil
                 gapMonitor = DataGapMonitor(threshold: 10)
 
+                connectedAt = Date()
                 phase = .connected
                 status = signals.isEmpty ? "Connected — no supported PIDs found" : "Connected"
 
@@ -173,6 +176,9 @@ final class LiveModel {
                 // active yet; the profile sweep records these same LIDs when it is.
                 await readDPF()
                 session.event(.adapterConnected, ["adapter": adapterName])
+
+                // Recording is automatic: connecting is the intent to record.
+                startRecording()
                 startPolling()
             } catch {
                 phase = .failed("\(error)")
@@ -204,18 +210,22 @@ final class LiveModel {
         runningSince = nil
     }
 
-    func disconnect() {
+    enum DisconnectReason: String {
+        case user
+        case idleTimeout = "idle_timeout"
+    }
+
+    func disconnect(reason: DisconnectReason = .user) {
         intentionalDisconnect = true
         pollTask?.cancel()
         pollTask = nil
 
+        session.event(.adapterDisconnected, ["reason": reason.rawValue])
         if isRecording {
-            session.event(.adapterDisconnected, ["reason": "user"])
-            session.event(.recordingInterrupted, ["reason": "adapter disconnected"])
-            stopRecording(reason: "adapter_disconnected")
-        } else {
-            session.event(.adapterDisconnected, ["reason": "user"])
+            reportGapTransition(gapMonitor.finish(now: Date()))
+            stopRecording(reason: reason.rawValue)
         }
+        connectedAt = nil
 
         transport.shutdown()
         elm = nil
@@ -227,14 +237,6 @@ final class LiveModel {
     }
 
     // MARK: - Recording
-
-    func toggleRecording() {
-        if isRecording {
-            stopRecording(reason: "user")
-        } else {
-            startRecording()
-        }
-    }
 
     func startRecording() {
         guard !isRecording else { return }
@@ -297,6 +299,13 @@ final class LiveModel {
         case .stopped(let id): recording = .stopped(sessionID: id)
         case .failed(let message): recording = .failed(message)
         }
+    }
+
+    /// Called when the app is about to terminate, so a session is not left open.
+    func prepareForTermination() {
+        guard isRecording else { return }
+        reportGapTransition(gapMonitor.finish(now: Date()))
+        stopRecording(reason: "app_quit")
     }
 
     func exportLastSession() {
@@ -444,6 +453,12 @@ final class LiveModel {
                 // faster. Back off so a parked session is cheap.
                 if let last = lastUpdate, Date().timeIntervalSince(last) > 5 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+
+                if let connectedAt,
+                   watchdog.shouldDisconnect(now: Date(), lastActivity: lastUpdate, connectedAt: connectedAt) {
+                    disconnect(reason: .idleTimeout)
+                    return
                 }
 
                 iteration += 1
