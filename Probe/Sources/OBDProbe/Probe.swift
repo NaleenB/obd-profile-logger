@@ -37,7 +37,8 @@ final class Probe {
         bleName: String,
         bleIdentifier: String,
         scanModules: Bool = true,
-        liveSampleSeconds: TimeInterval = 20
+        liveSampleSeconds: TimeInterval = 20,
+        mode22Seconds: TimeInterval = 150
     ) async throws {
         connectedPortLabel = portLabel
         adapter["bleName"] = bleName.isEmpty ? "(unnamed)" : bleName
@@ -68,6 +69,7 @@ final class Probe {
         if scanModules {
             try await identifyModules()
         }
+        try await sweepMode22(budget: mode22Seconds)
 
         try writeOutputs()
     }
@@ -312,6 +314,93 @@ final class Probe {
             }
         }
         vehicle["mode06"] = results
+    }
+
+    // MARK: - Mode 22 sweep
+
+    /// Read-only sweep of the UDS identifier space on the engine ECU.
+    ///
+    /// Nothing here writes to the ECU: service 0x22 is ReadDataByIdentifier.
+    /// Negative replies (7F 22 xx) are recorded too — they map what is absent,
+    /// which is as useful as what is present.
+    private func sweepMode22(budget: TimeInterval) async throws {
+        rule("Mode 22 identifier sweep (read-only)")
+
+        guard budget > 0 else {
+            say("  Skipped.")
+            return
+        }
+
+        _ = try? await elm.send("ATH0", timeout: 3)
+        _ = try? await elm.send("ATSP6", timeout: 3)
+        _ = try? await elm.send("ATSH7E0", timeout: 3)
+
+        let ranges: [(UInt16, UInt16)] = [
+            (0xF100, 0xF1FF),   // UDS identification block
+            (0x0100, 0x01FF),
+            (0x0200, 0x02FF),
+            (0x1000, 0x10FF),
+            (0x2000, 0x20FF),
+            (0x3000, 0x30FF)
+        ]
+
+        var positive: [String: String] = [:]
+        var rejected = 0
+        var silent = 0
+        var tried = 0
+        let start = Date()
+
+        sweep: for (low, high) in ranges {
+            for did in low...high {
+                if Date().timeIntervalSince(start) > budget { break sweep }
+
+                let command = String(format: "22%04X", did)
+                tried += 1
+
+                guard let reply = try? await elm.send(command, timeout: 1.2),
+                      let hex = reply.payloadHex
+                else {
+                    silent += 1
+                    continue
+                }
+
+                if hex.hasPrefix("62") {
+                    positive[String(format: "%04X", did)] = hex
+                } else if hex.hasPrefix("7F") {
+                    rejected += 1
+                } else {
+                    silent += 1
+                }
+
+                if tried % 64 == 0 {
+                    sayInline("    … \(tried) tried, \(positive.count) answered\r")
+                }
+            }
+        }
+
+        _ = try? await elm.send("ATSH7DF", timeout: 3)
+        _ = try? await elm.send("ATAR", timeout: 3)
+        _ = try? await elm.send("ATH0", timeout: 3)
+
+        say("  \(tried) identifiers tried in \(Int(Date().timeIntervalSince(start)))s")
+        say("  \(positive.count) answered, \(rejected) rejected, \(silent) silent")
+
+        for key in positive.keys.sorted() {
+            let value = positive[key] ?? ""
+            say("    \(key) → \(value.prefix(64))")
+        }
+
+        if positive.isEmpty {
+            notes.append("Mode 22 sweep found no manufacturer identifiers; the ECU may not expose them on 7E0.")
+        }
+
+        vehicle["mode22"] = [
+            "tried": tried,
+            "answered": positive,
+            "rejected": rejected,
+            "silent": silent,
+            "budgetSeconds": budget
+        ]
     }
 
     // MARK: - Live sample

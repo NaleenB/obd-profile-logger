@@ -15,6 +15,7 @@ struct ProbeApp {
         var replayPath: String? = nil
         var scanTimeout: Double = 90
         var sampleSeconds: Double = 20
+        var mode22Seconds: Double = 150
     }
 
     static func main() async {
@@ -115,7 +116,8 @@ struct ProbeApp {
                 portLabel: port.label,
                 bleName: candidate.name,
                 bleIdentifier: candidate.peripheral.identifier.uuidString,
-                liveSampleSeconds: options.sampleSeconds
+                liveSampleSeconds: options.sampleSeconds,
+                mode22Seconds: options.mode22Seconds
             )
 
             finish(0)
@@ -160,6 +162,8 @@ struct ProbeApp {
                 if let value = next(), let parsed = Double(value) { options.scanTimeout = parsed }
             case "--sample-seconds":
                 if let value = next(), let parsed = Double(value) { options.sampleSeconds = parsed }
+            case "--mode22-seconds":
+                if let value = next(), let parsed = Double(value) { options.mode22Seconds = parsed }
             case "--skip-ignition":
                 options.skipIgnition = true
             case "--scan-seconds":
@@ -193,6 +197,7 @@ struct ProbeApp {
           --scan-seconds <n>    how long each scan window lasts (default 6)
           --scan-timeout <n>    total time to keep retrying the scan (default 90)
           --sample-seconds <n>  live sampling duration (default 20, 0 disables)
+          --mode22-seconds <n>  UDS identifier sweep budget (default 150, 0 disables)
           --ignition-wait <n>   seconds to wait for the ECU after prompting (default 180)
           --skip-ignition       adapter-only probe, no ECU queries
           --out <dir>           results directory (default Probe/results/<timestamp>)
