@@ -26,7 +26,7 @@ This project does both:
 |---|---|---|
 | **Standard OBD-II** | Any car with a compliant ELM327 adapter | Modes `01`, `03`, `07`, `0A`, `09` |
 | **Vehicle profile** | Per vehicle, loaded from JSON | Manufacturer service, byte offsets, scaling |
-| **Included profile** | 2016 Outlander 2.2 DiD (4N14) | Mitsubishi service `0x21` — 276 parameters |
+| **Included profile** | 2016 Outlander 2.2 DiD (4N14) | Mitsubishi service `0x21` — 274 parameters |
 
 Verified on the car, not inferred:
 
