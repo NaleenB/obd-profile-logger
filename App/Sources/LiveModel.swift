@@ -226,16 +226,6 @@ final class LiveModel {
     }
     var isRecording: Bool { recording.isRecording }
 
-    /// The two soot models disagree by 2x or more. On this car the
-    /// differential-pressure sensor reads zero at all engine speeds, so the
-    /// smaller figure is the one to distrust.
-    var sootEstimatorsDisagree: Bool {
-        let byAccumulation = manufacturer.values.first { $0.itemNumber == 155 }?.value
-        let byPressure = manufacturer.values.first { $0.itemNumber == 156 }?.value
-        guard let a = byAccumulation, let b = byPressure, a > 0.2 else { return false }
-        return max(a, b) / max(min(a, b), 0.05) >= 2.0
-    }
-
     var manufacturerHighlights: [DecodedParameter] {
         guard let profile else { return [] }
         return profile.highlights(from: Array(manufacturer.values))
