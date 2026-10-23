@@ -60,6 +60,7 @@ final class LiveModel {
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
     private var odometerKm: Int?
+    private var lastOdometerRead = Date.distantPast
     private var ambientTempC: Double?
     private var profileURL: URL?
     private var lastSessionEnd: Date? =
@@ -71,6 +72,9 @@ final class LiveModel {
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
     private var profileIndex = 0
+    private var sweepAttempted: Set<UInt8> = []
+    private var sweepAnswered: Set<UInt8> = []
+    private var sweepCycles = 0
     private var lastDTCStep = Date.distantPast
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
@@ -203,6 +207,16 @@ final class LiveModel {
     }
     var isRecording: Bool { recording.isRecording }
 
+    /// The two soot models disagree by 2x or more. On this car the
+    /// differential-pressure sensor reads zero at all engine speeds, so the
+    /// smaller figure is the one to distrust.
+    var sootEstimatorsDisagree: Bool {
+        let byAccumulation = manufacturer.values.first { $0.itemNumber == 155 }?.value
+        let byPressure = manufacturer.values.first { $0.itemNumber == 156 }?.value
+        guard let a = byAccumulation, let b = byPressure, a > 0.2 else { return false }
+        return max(a, b) / max(min(a, b), 0.05) >= 2.0
+    }
+
     var manufacturerHighlights: [DecodedParameter] {
         guard let profile else { return [] }
         return profile.highlights(from: Array(manufacturer.values))
@@ -317,6 +331,7 @@ final class LiveModel {
                 // Start it first so the connection event is not discarded.
                 startRecording()
                 session.event(.adapterConnected, ["adapter": adapterName])
+                await captureTripSnapshot(phase: "start", using: client)
                 startPolling()
             } catch {
                 phase = .failed("\(error)")
@@ -429,6 +444,7 @@ final class LiveModel {
             return
         }
         reportGapTransition(gapMonitor.finish(now: Date()))
+        emitCachedSnapshot(phase: "end")
         session.updateOdometer(end: odometerKm)
         let result = session.stop(reason: reason)
         lastSessionEnd = Date()
@@ -597,8 +613,19 @@ final class LiveModel {
                     await sample(voltage, using: elm)
                 }
 
+                if isRecording,
+                   Date().timeIntervalSince(lastOdometerRead) > 60 {
+                    lastOdometerRead = Date()
+                    if let reading = await readOdometer(using: elm) {
+                        odometerKm = reading
+                    }
+                }
+
                 if Task.isCancelled { return }
                 await stepDTCScan(using: elm)
+
+                if Task.isCancelled { return }
+                await stepPriorityScan(using: elm)
 
                 if Task.isCancelled { return }
                 await stepProfileScan(using: elm)
@@ -727,19 +754,16 @@ final class LiveModel {
 
     // MARK: - Manufacturer data
 
-    /// One local identifier per loop, so 76 blocks refresh in the background
-    /// without blocking live sampling.
-    private func stepProfileScan(using elm: ELMClient) async {
-        guard let profile, !profile.localIdentifiers.isEmpty else { return }
-        let lid = profile.localIdentifiers[profileIndex % profile.localIdentifiers.count]
-        profileIndex += 1
+    /// The live block: exhaust, catalyst and DPF temperatures plus differential
+    /// pressure. Once per loop so a loaded drive actually characterises the
+    /// sensor instead of sampling it every 90 seconds.
+    private static let priorityLID: UInt8 = 0x10
 
+    private func stepPriorityScan(using elm: ELMClient) async {
+        guard let profile, profile.localIdentifiers.contains(Self.priorityLID) else { return }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
-        let command = String(format: "21%02X", lid)
-        guard let reply = try? await elm.send(command, timeout: 6),
-              let hex = reply.payloadHex,
-              let frame = MUT21Frame(hex: hex)
-        else { return }
+        let reply = try? await elm.send("2110", timeout: 3)
+        guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return }
 
         for decoded in profile.decode(frame) {
             manufacturer[decoded.id] = decoded
@@ -755,6 +779,100 @@ final class LiveModel {
                 if !written { syncRecordingState() }
             }
         }
+    }
+
+    /// One local identifier per loop, so 76 blocks refresh in the background
+    /// without blocking live sampling.
+    private func stepProfileScan(using elm: ELMClient) async {
+        guard let profile, !profile.localIdentifiers.isEmpty else { return }
+        let count = profile.localIdentifiers.count
+        let lid = profile.localIdentifiers[profileIndex % count]
+        profileIndex += 1
+
+        if profileIndex % count == 0, !sweepAttempted.isEmpty {
+            sweepCycles += 1
+            session.event(.sweepCompleted, [
+                "cycle": String(sweepCycles),
+                "attempted": String(sweepAttempted.count),
+                "answered": String(sweepAnswered.count),
+                "missing": profile.localIdentifiers
+                    .filter { !sweepAttempted.contains($0) }
+                    .map { String(format: "%02X", $0) }
+                    .joined(separator: ",")
+            ])
+            sweepAttempted.removeAll()
+        }
+
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        let command = String(format: "21%02X", lid)
+        guard let reply = try? await elm.send(command, timeout: 6),
+              let hex = reply.payloadHex,
+              let frame = MUT21Frame(hex: hex)
+        else { return }
+
+        sweepAttempted.insert(lid)
+        let decodedValues = profile.decode(frame)
+        if !decodedValues.isEmpty { sweepAnswered.insert(lid) }
+
+        for decoded in decodedValues {
+            manufacturer[decoded.id] = decoded
+            if isRecording {
+                let written = session.manufacturerSample(
+                    lid: decoded.lid,
+                    itemNumber: decoded.itemNumber,
+                    name: decoded.name,
+                    value: decoded.value,
+                    unit: decoded.unit,
+                    raw: hex
+                )
+                if !written { syncRecordingState() }
+            }
+        }
+    }
+
+    /// Everything a future comparison needs, captured once at each end of a
+    /// session so regen interval and soot-per-km become measurable rather than
+    /// inferred.
+    private func captureTripSnapshot(phase: String, using elm: ELMClient) async {
+        guard let profile else { return }
+        var details: [String: String] = ["phase": phase]
+
+        for lid in [UInt8(0x03), 0x10, 0x11, 0x12] {
+            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            guard let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
+                  let hex = reply.payloadHex,
+                  let frame = MUT21Frame(hex: hex)
+            else { continue }
+            for value in profile.decode(frame) {
+                let key = value.name
+                    .lowercased()
+                    .replacingOccurrences(of: " ", with: "_")
+                    .replacingOccurrences(of: ".", with: "")
+                details[String(format: "%02X.%@", lid, key)] = String(format: "%.2f", value.value)
+            }
+        }
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        if let odometerKm { details["odometerKm"] = String(odometerKm) }
+        if let ambientTempC { details["ambientTempC"] = String(format: "%.1f", ambientTempC) }
+        session.event(.tripSnapshot, details)
+    }
+
+    /// End-of-session snapshot without new I/O. The live block is refreshed
+    /// every cycle, so these values are at most a second or two old.
+    private func emitCachedSnapshot(phase: String) {
+        guard !manufacturer.isEmpty else { return }
+        var details: [String: String] = ["phase": phase, "source": "cached"]
+
+        for value in manufacturer.values {
+            let key = value.name
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "_")
+                .replacingOccurrences(of: ".", with: "")
+            details[String(format: "%02X.%@", value.lid, key)] = String(format: "%.2f", value.value)
+        }
+        if let odometerKm { details["odometerKm"] = String(odometerKm) }
+        session.event(.tripSnapshot, details)
     }
 
     /// Odometer from the engine ECU (item 145). Needed because regeneration

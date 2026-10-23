@@ -167,9 +167,17 @@ struct ContentView: View {
 
     private var manufacturerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Manufacturer data")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Manufacturer data")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if model.sootEstimatorsDisagree {
+                    Label("soot models disagree", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .help("The differential-pressure estimate is unreliable on this car; trust the accumulation figure.")
+                }
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 8) {
                 ForEach(model.manufacturerHighlights) { parameter in
