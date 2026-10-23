@@ -103,7 +103,24 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(row["name"] as? String, "Soot loading by summation")
         XCTAssertEqual(row["unit"] as? String, "g/L")
         XCTAssertEqual(row["value"] as? Double, 2.6)
-        XCTAssertEqual(row["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(row["schemaVersion"] as? Int, 3)
+    }
+
+    /// An unknown unit is omitted rather than written as an empty string.
+    func testUnknownUnitIsOmitted() throws {
+        let session = try started()
+        XCTAssertTrue(session.manufacturerSample(
+            lid: 0x47,
+            itemNumber: 16,
+            name: "EGR valve position",
+            value: 12,
+            unit: "",
+            raw: "6147000C"
+        ))
+
+        let directory = try XCTUnwrap(session.directory)
+        let samples = try rows(directory, SessionRecorder.samplesFilename())
+        XCTAssertNil(samples[0]["unit"])
     }
 
     func testStopReportsCompletedAndIsIdempotent() throws {

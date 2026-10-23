@@ -367,32 +367,6 @@
           }
         },
         {
-          "itemNumber": 11,
-          "name": "APP sensor(main)",
-          "byte": 2,
-          "length": 1,
-          "factor": 0.390625,
-          "offset": 0.0,
-          "unit": "%",
-          "observed": {
-            "raw": 0,
-            "value": 0.0
-          }
-        },
-        {
-          "itemNumber": 12,
-          "name": "APP sensor(sub)",
-          "byte": 3,
-          "length": 1,
-          "factor": 0.390625,
-          "offset": 0.0,
-          "unit": "%",
-          "observed": {
-            "raw": 0,
-            "value": 0.0
-          }
-        },
-        {
           "itemNumber": 12,
           "name": "APP sensor(sub)",
           "byte": 3,

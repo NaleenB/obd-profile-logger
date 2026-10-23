@@ -95,7 +95,7 @@ public final class RecordingSession {
         itemNumber: Int?,
         name: String,
         value: Double,
-        unit: String,
+        unit: String?,
         raw: String? = nil
     ) -> Bool {
         guard let recorder, isRecording else { return false }

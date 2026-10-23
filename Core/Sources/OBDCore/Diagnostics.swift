@@ -87,10 +87,18 @@ public struct ModuleDiagnostics: Equatable {
         self.permanent = permanent
     }
 
-    /// Every query answered and decoded.
+    /// Monitor status, stored and pending codes all answered and decoded.
+    ///
+    /// Mode `0A` (permanent codes) is excluded: this ECM answers stored and
+    /// pending but not permanent, so including it would mark every scan
+    /// incomplete forever and make the flag meaningless. `permanentKnown`
+    /// reports it separately.
     public var isComplete: Bool {
-        milOn != nil && stored != nil && pending != nil && permanent != nil
+        milOn != nil && stored != nil && pending != nil
     }
+
+    /// Whether the permanent-code list was actually retrieved.
+    public var permanentKnown: Bool { permanent != nil }
 
     public var allCodes: [String] {
         (stored ?? []) + (pending ?? []) + (permanent ?? [])

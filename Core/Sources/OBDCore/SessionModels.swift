@@ -9,7 +9,8 @@ public enum SessionSchema {
     ///
     /// 2: `pid` became optional so service `0x21` observations can carry a
     /// local identifier instead.
-    public static let version = 2
+    /// 3: `unit` is omitted when unknown rather than written as an empty string.
+    public static let version = 3
 }
 
 public struct SessionManifest: Codable, Equatable {
@@ -66,7 +67,8 @@ public struct SampleRecord: Codable, Equatable {
     public var itemNumber: Int?
     public var name: String
     public var value: Double
-    public var unit: String
+    /// Omitted when the profile does not know the engineering unit.
+    public var unit: String?
     /// Raw response payload, so a decoding bug can be corrected later without
     /// re-driving the car.
     public var raw: String?
@@ -87,7 +89,7 @@ public struct SampleRecord: Codable, Equatable {
         self.pid = String(format: "%02X", pid)
         self.name = name
         self.value = value
-        self.unit = unit
+        self.unit = unit.isEmpty ? nil : unit
         self.raw = raw
     }
 
@@ -101,7 +103,7 @@ public struct SampleRecord: Codable, Equatable {
         itemNumber: Int?,
         name: String,
         value: Double,
-        unit: String,
+        unit: String?,
         raw: String? = nil
     ) {
         self.schemaVersion = schemaVersion
@@ -113,7 +115,7 @@ public struct SampleRecord: Codable, Equatable {
         self.itemNumber = itemNumber
         self.name = name
         self.value = value
-        self.unit = unit
+        self.unit = (unit?.isEmpty ?? true) ? nil : unit
         self.raw = raw
     }
 }

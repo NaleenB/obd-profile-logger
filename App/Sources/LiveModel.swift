@@ -54,6 +54,7 @@ final class LiveModel {
     private var lastRPM: Double?
     private(set) var batteryReport: BatteryReport?
     private var batteryLogged = false
+    private var runningSince: Date?
 
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
@@ -150,6 +151,7 @@ final class LiveModel {
                 lastRPM = nil
                 batteryLogged = false
                 batteryReport = nil
+                runningSince = nil
 
                 phase = .connected
                 status = signals.isEmpty ? "Connected — no supported PIDs found" : "Connected"
@@ -289,7 +291,16 @@ final class LiveModel {
 
         battery.ingest(VoltageSample(atMs: batteryClock.nowMs(), volts: volts, rpm: lastRPM))
 
-        guard !batteryLogged, battery.currentPhase == .running else { return }
+        guard battery.currentPhase == .running else { return }
+        if runningSince == nil { runningSince = Date() }
+
+        // Wait for the alternator to settle before reporting: an immediate
+        // snapshot has no charging voltage to show.
+        guard !batteryLogged,
+              let since = runningSince,
+              Date().timeIntervalSince(since) >= 5
+        else { return }
+
         batteryLogged = true
         let report = battery.report()
         batteryReport = report
@@ -501,7 +512,7 @@ final class LiveModel {
                     itemNumber: decoded.itemNumber,
                     name: decoded.name,
                     value: decoded.value,
-                    unit: decoded.unit ?? "",
+                    unit: decoded.unit,
                     raw: hex
                 )
                 if !written { syncRecordingState() }

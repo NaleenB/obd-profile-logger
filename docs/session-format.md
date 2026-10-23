@@ -64,7 +64,7 @@ without being forced into a standard PID field.
 | `pid` | two-digit hex, standard PIDs only |
 | `service`, `lid` | diagnostic service and local identifier, manufacturer data |
 | `itemNumber` | manufacturer data-list item, when the profile supplies one |
-| `name`, `unit` | human labels, as displayed |
+| `name`, `unit` | human labels, as displayed; `unit` is omitted when unknown |
 | `value` | engineering value, already scaled |
 | `raw` | response payload, so a decoding bug can be corrected later |
 

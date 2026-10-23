@@ -174,7 +174,15 @@ def main():
                         "value": raw * param["factor"] + param["offset"],
                     }
 
-            blocks.setdefault(lid, []).append(entry)
+            bucket = blocks.setdefault(lid, [])
+            # The source data repeats some parameters inside a block; identical
+            # name/offset/scaling entries are the same parameter twice.
+            identity = (entry["name"], entry["byte"], entry["length"],
+                        entry["factor"], entry["offset"])
+            if any((e["name"], e["byte"], e["length"], e["factor"], e["offset"]) == identity
+                   for e in bucket):
+                continue
+            bucket.append(entry)
 
     profile = {
         "schemaVersion": 1,
