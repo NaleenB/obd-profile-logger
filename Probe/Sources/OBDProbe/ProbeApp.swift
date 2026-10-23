@@ -20,6 +20,8 @@ struct ProbeApp {
         var mode22Seconds: Double = 150
         var sweepOnly = false
         var sweepService: UInt8 = 0x22
+        var dpfCheck = false
+        var profilePath = "../profiles/mitsubishi/outlander-2016-4n14.json"
     }
 
     static func main() async {
@@ -114,6 +116,13 @@ struct ProbeApp {
                 }
             }
 
+            if options.dpfCheck {
+                let profile = try VehicleProfileLoader.load(
+                    from: URL(fileURLWithPath: options.profilePath))
+                try await probe.runDPFCheck(profile: profile, secondsPerPhase: 1.5)
+                finish(0)
+            }
+
             try await probe.run(
                 ignitionWait: options.ignitionWait,
                 skipIgnition: options.skipIgnition,
@@ -172,6 +181,10 @@ struct ProbeApp {
                 if let value = next(), let parsed = Double(value) { options.mode22Seconds = parsed }
             case "--sweep-only":
                 options.sweepOnly = true
+            case "--dpf-check":
+                options.dpfCheck = true
+            case "--profile":
+                if let value = next() { options.profilePath = value }
             case "--service":
                 if let value = next(), let parsed = UInt8(value, radix: 16) {
                     options.sweepService = parsed
@@ -210,6 +223,8 @@ struct ProbeApp {
           --scan-timeout <n>    total time to keep retrying the scan (default 90)
           --sample-seconds <n>  live sampling duration (default 20, 0 disables)
           --mode22-seconds <n>  UDS identifier sweep budget (default 150, 0 disables)
+          --dpf-check           characterise the DPF differential-pressure sensor
+          --profile <path>      vehicle profile for --dpf-check
           --sweep-only          skip everything except the identifier sweep
           --service <hex>       service to sweep: 22 (default), 21, or 1A
           --ignition-wait <n>   seconds to wait for the ECU after prompting (default 180)

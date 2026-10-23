@@ -27,8 +27,14 @@ public final class SessionRecorder {
     public static func samplesFilename() -> String { "samples.ndjson" }
     public static func eventsFilename() -> String { "events.ndjson" }
     public static func manifestFilename() -> String { "manifest.json" }
+    public static func profileFilename() -> String { "profile.json" }
 
-    public init(directory: URL, manifest: SessionManifest, clock: MonotonicClock = UptimeClock()) throws {
+    public init(
+        directory: URL,
+        manifest: SessionManifest,
+        profileData: Data? = nil,
+        clock: MonotonicClock = UptimeClock()
+    ) throws {
         self.directory = directory
         self.manifest = manifest
         self.sessionID = manifest.sessionID
@@ -57,6 +63,12 @@ public final class SessionRecorder {
         let manifestEncoder = JSONEncoder()
         manifestEncoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try manifestEncoder.encode(manifest).write(to: manifestURL)
+
+        // The profile is the decoding key. Store it beside the data so the
+        // session remains interpretable even after the app ships a new one.
+        if let profileData {
+            try profileData.write(to: directory.appendingPathComponent(Self.profileFilename()))
+        }
     }
 
     // MARK: - Samples
@@ -158,6 +170,14 @@ public final class SessionRecorder {
         }
 
         return problems.isEmpty ? .completed : .incomplete(problems.joined(separator: "; "))
+    }
+
+    /// Mutate the manifest while the session is open. Used for values that only
+    /// become known later, such as the odometer at stop.
+    public func updateManifest(_ change: (inout SessionManifest) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        change(&manifest)
     }
 
     public var isClosed: Bool {

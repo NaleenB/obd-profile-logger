@@ -37,10 +37,12 @@ public final class RecordingSession {
         manifest: SessionManifest,
         root: URL? = nil,
         clock: MonotonicClock = UptimeClock(),
-        details: [String: String] = [:]
+        details: [String: String] = [:],
+        profileData: Data? = nil
     ) throws {
         guard recorder == nil else { return }
-        let created = try SessionStore.createSession(root: root, manifest: manifest, clock: clock)
+        let created = try SessionStore.createSession(
+            root: root, manifest: manifest, profileData: profileData, clock: clock)
         var startDetails = details
         startDetails["profile"] = manifest.vehicleProfileID ?? "none"
         try created.recordEvent(.sessionStarted, details: startDetails)
@@ -48,6 +50,12 @@ public final class RecordingSession {
         directory = created.directory
         lastFinalize = nil
         state = .recording(sessionID: created.sessionID)
+    }
+
+    /// Odometer is only known at the end of a session; record it before closing.
+    public func updateOdometer(end: Int?) {
+        guard let end, let recorder else { return }
+        recorder.updateManifest { $0.odometerEndKm = end }
     }
 
     /// Stops recording and returns what actually happened. A partial session is

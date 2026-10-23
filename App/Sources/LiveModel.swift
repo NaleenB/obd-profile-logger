@@ -59,6 +59,11 @@ final class LiveModel {
     private var batteryLogged = false
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
+    private var odometerKm: Int?
+    private var ambientTempC: Double?
+    private var profileURL: URL?
+    private var lastSessionEnd: Date? =
+        UserDefaults.standard.object(forKey: "lastSessionEnd") as? Date
     private var intentionalDisconnect = false
     private let watchdog = IdleWatchdog(timeout: 600)
     private var connectedAt: Date?
@@ -93,6 +98,7 @@ final class LiveModel {
 
     private func loadProfile(id: String) {
         profileID = id
+        profileURL = Bundle.main.url(forResource: resourceName(for: id), withExtension: "json")
         do {
             profile = try ProfileCatalog.load(id: resourceName(for: id))
         } catch {
@@ -304,6 +310,8 @@ final class LiveModel {
                 // Read DPF once for immediate display. Recording is usually not
                 // active yet; the profile sweep records these same LIDs when it is.
                 await readDPF()
+                odometerKm = await readOdometer(using: client)
+                ambientTempC = await readAmbient(using: client)
 
                 // Recording is automatic: connecting is the intent to record.
                 // Start it first so the connection event is not discarded.
@@ -371,6 +379,10 @@ final class LiveModel {
     func startRecording() {
         guard !isRecording else { return }
 
+        let profileData = profileURL.flatMap { try? Data(contentsOf: $0) }
+        let profileHash = profileData.map(ProfileFingerprint.hash(of:))
+        let soak = lastSessionEnd.map { Date().timeIntervalSince($0) / 3600 }
+
         let manifest = SessionManifest(
             sessionID: SessionStore.makeSessionID(),
             startedAt: WallClock.iso(),
@@ -382,6 +394,11 @@ final class LiveModel {
                 ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
                 : nil,
             capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            profileHash: profileHash,
+            timezoneOffsetSeconds: TimeZone.current.secondsFromGMT(),
+            odometerStartKm: odometerKm,
+            ambientTempC: ambientTempC,
+            coldSoakHours: soak,
             notes: [
                 "Standard PIDs plus service 0x21 manufacturer observations.",
                 "DTC scans cover the engine (7E0) and transmission (7E1) only."
@@ -391,7 +408,8 @@ final class LiveModel {
         do {
             try session.start(
                 manifest: manifest,
-                details: ["polledPIDs": signals.map(\.pid).joined(separator: ",")]
+                details: ["polledPIDs": signals.map(\.pid).joined(separator: ",")],
+                profileData: profileData
             )
             syncRecordingState()
             lastSessionURL = session.directory
@@ -411,7 +429,10 @@ final class LiveModel {
             return
         }
         reportGapTransition(gapMonitor.finish(now: Date()))
+        session.updateOdometer(end: odometerKm)
         let result = session.stop(reason: reason)
+        lastSessionEnd = Date()
+        UserDefaults.standard.set(lastSessionEnd, forKey: "lastSessionEnd")
         syncRecordingState()
         lastSessionURL = session.directory
 
@@ -734,6 +755,30 @@ final class LiveModel {
                 if !written { syncRecordingState() }
             }
         }
+    }
+
+    /// Odometer from the engine ECU (item 145). Needed because regeneration
+    /// interval and soot-per-km are otherwise not computable.
+    private func readOdometer(using elm: ELMClient) async -> Int? {
+        guard let profile else { return nil }
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        let reply = try? await elm.send("2103", timeout: 3)
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return nil }
+        return profile.decode(frame)
+            .first { $0.itemNumber == 145 }
+            .map { Int($0.value) }
+    }
+
+    /// Intake air temperature with the engine off, as an ambient proxy: this ECU
+    /// has no ambient-temperature PID.
+    private func readAmbient(using elm: ELMClient) async -> Double? {
+        guard let reply = try? await elm.send("010F", timeout: 3),
+              let hex = reply.payloadHex, hex.hasPrefix("410F"),
+              let bytes = LiveModel.bytes(String(hex.dropFirst(4))),
+              let first = bytes.first
+        else { return nil }
+        return Double(first) - 40
     }
 
     // MARK: - DPF

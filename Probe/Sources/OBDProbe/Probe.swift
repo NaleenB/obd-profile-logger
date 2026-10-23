@@ -441,6 +441,128 @@ final class Probe {
         vehicle["mode06"] = results
     }
 
+    // MARK: - DPF sensor check
+
+    /// Characterises the exhaust differential-pressure sensor.
+    ///
+    /// The two soot estimators disagree by a factor of nine on this car (2.6 and
+    /// 0.3 g/L). That is either a decode fault in the differential-pressure path
+    /// or a hardware fact, and this tells you which: a working sensor reads
+    /// roughly zero with no flow, rises at idle, and rises further with RPM.
+    func runDPFCheck(profile: VehicleProfile, secondsPerPhase: TimeInterval) async throws {
+        rule("DPF differential-pressure check")
+
+        guard let sensor = profileParameter(profile, item: 120),
+              let sootDiff = profileParameter(profile, item: 156) else {
+            throw ProbeError.noData("profile does not define items 120 and 156")
+        }
+
+        func read(rpm: Double?) async -> (dp: Double?, soot: Double?) {
+            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            let reply = try? await elm.send("2110", timeout: 3)
+            _ = try? await elm.send("ATSH7DF", timeout: 2)
+            guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else {
+                return (nil, nil)
+            }
+            let values = profile.decode(frame)
+            let dp = values.first { $0.itemNumber == 120 }?.value
+            let soot = values.first { $0.itemNumber == 156 }?.value
+            return (dp, soot)
+        }
+
+        func rpmNow() async -> Double? {
+            guard let reply = try? await elm.send("010C", timeout: 2),
+                  let hex = reply.payloadHex, hex.hasPrefix("410C"),
+                  let bytes = bytesFromHex(String(hex.dropFirst(4))), bytes.count >= 2
+            else { return nil }
+            return (Double(bytes[0]) * 256.0 + Double(bytes[1])) / 4.0
+        }
+
+        func phase(_ title: String, samples: Int) async -> [Double] {
+            say("")
+            say("  \(title)")
+            var collected: [Double] = []
+            for index in 0..<samples {
+                let rpm = await rpmNow()
+                let result = await read(rpm: rpm)
+                if let dp = result.dp {
+                    collected.append(dp)
+                    say(String(format: "    %2d  %6.0f rpm   dP %6.2f kPa   soot(dP) %5.2f g/L",
+                               index + 1, rpm ?? 0, dp, result.soot ?? 0))
+                } else {
+                    say("    \(index + 1)  no reply")
+                }
+                try? await Task.sleep(nanoseconds: UInt64(secondsPerPhase / Double(samples) * 1_000_000_000))
+            }
+            return collected
+        }
+
+        func median(_ values: [Double]) -> Double? {
+            guard !values.isEmpty else { return nil }
+            let sorted = values.sorted()
+            return sorted[sorted.count / 2]
+        }
+
+        say("")
+        say("  Phase 1 — ignition ON, engine OFF. Do not start the engine yet.")
+        let off = await phase("No flow (sensor zero)", samples: 6)
+
+        say("")
+        say("  Phase 2 — START THE ENGINE now and leave it idling.")
+        say("  Waiting for the engine to catch…")
+        for _ in 0..<30 {
+            if let rpm = await rpmNow(), rpm > 400 { break }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        let idle = await phase("Idle", samples: 8)
+
+        say("")
+        say("  Phase 3 — HOLD THE ENGINE AT ABOUT 2500 RPM until this finishes.")
+        let revved = await phase("Raised RPM", samples: 8)
+
+        let zero = median(off)
+        let atIdle = median(idle)
+        let atRev = median(revved)
+
+        rule("Result")
+        say(String(format: "  no flow     %@", zero.map { String(format: "%.2f kPa", $0) } ?? "no data"))
+        say(String(format: "  idle        %@", atIdle.map { String(format: "%.2f kPa", $0) } ?? "no data"))
+        say(String(format: "  ~2500 rpm   %@", atRev.map { String(format: "%.2f kPa", $0) } ?? "no data"))
+
+        var notesOut: [String] = []
+        if let zero {
+            let ok = abs(zero) <= 2.5
+            say("  \(ok ? "OK  " : "FAIL") sensor zero within the +-2.5 kPa specification"
+                + (ok ? "" : " — the sensor or its wiring is suspect"))
+            notesOut.append("zero=\(zero)")
+        } else {
+            say("  FAIL no reading with no flow")
+        }
+
+        if let zero, let atRev {
+            let rise = atRev - zero
+            let responds = rise > 0.5
+            say("  \(responds ? "OK  " : "FAIL") rises with exhaust flow (+\(String(format: "%.2f", rise)) kPa)")
+            if !responds {
+                say("        A sensor that does not move with flow cannot produce a soot estimate.")
+                say("        Treat the differential-pressure soot figure as unreliable.")
+            }
+        }
+
+        vehicle["dpfCheck"] = [
+            "noFlowKPa": zero ?? 0,
+            "idleKPa": atIdle ?? 0,
+            "raisedRPMKPa": atRev ?? 0,
+            "sensorItem": sensor.itemNumber ?? 0,
+            "sootItem": sootDiff.itemNumber ?? 0
+        ]
+        _ = notesOut
+    }
+
+    private func profileParameter(_ profile: VehicleProfile, item: Int) -> VehicleProfile.Parameter? {
+        profile.blocks.flatMap(\.parameters).first { $0.itemNumber == item }
+    }
+
     // MARK: - Mode 22 sweep
 
     /// Read-only sweep of the UDS identifier space on the engine ECU.

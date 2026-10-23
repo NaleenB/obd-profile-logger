@@ -11,6 +11,7 @@ OBDLogger/Sessions/<yyyyMMdd-HHmmss>-<4 hex>/
   manifest.json
   samples.ndjson
   events.ndjson
+  profile.json      the decoding rules used, copied in at session start
 ```
 
 Session IDs are UTC timestamps plus a random suffix, so they sort chronologically
@@ -34,6 +35,11 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
 | `supportedPIDs` | full capability set discovered at connect; null when discovery failed |
 | `capabilityDiscovery` | `succeeded` or `failed` — an empty list alone cannot say which |
+| `profileHash` | SHA-256 of the profile JSON used, so a decode change is detectable |
+| `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
+| `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval |
+| `ambientTempC` | intake air temperature before the engine started, used as an ambient proxy |
+| `coldSoakHours` | hours since the previous session ended, when known |
 | `notes` | free-form, including what the recording did **not** cover |
 
 Nothing is invented. A value the app could not determine is omitted or null.

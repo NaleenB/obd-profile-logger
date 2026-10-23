@@ -262,3 +262,75 @@ final class SessionSummaryTests: XCTestCase {
         XCTAssertTrue(SessionStore.summaries(root: root).isEmpty)
     }
 }
+
+final class ManifestProvenanceTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-prov-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testProfileHashIsStableAndSensitive() {
+        let a = Data(#"{"id":"x"}"#.utf8)
+        let b = Data(#"{"id":"y"}"#.utf8)
+        XCTAssertEqual(ProfileFingerprint.hash(of: a).count, 64)
+        XCTAssertEqual(ProfileFingerprint.hash(of: a), ProfileFingerprint.hash(of: a))
+        XCTAssertNotEqual(ProfileFingerprint.hash(of: a), ProfileFingerprint.hash(of: b))
+    }
+
+    /// The profile must be stored with the session, or the data becomes
+    /// uninterpretable once the app ships a different one.
+    func testProfileIsCopiedIntoTheSession() throws {
+        let profile = Data(#"{"schemaVersion":1,"id":"test"}"#.utf8)
+        let recorder = try SessionStore.createSession(
+            root: root,
+            manifest: SessionManifest(sessionID: "s1", startedAt: WallClock.iso(), appVersion: "t"),
+            profileData: profile
+        )
+        recorder.finish(reason: "user")
+
+        let copied = recorder.directory.appendingPathComponent(SessionRecorder.profileFilename())
+        XCTAssertEqual(try Data(contentsOf: copied), profile)
+    }
+
+    func testProvenanceFieldsRoundTrip() throws {
+        let manifest = SessionManifest(
+            sessionID: "s2",
+            startedAt: WallClock.iso(),
+            appVersion: "t",
+            profileHash: String(repeating: "a", count: 64),
+            timezoneOffsetSeconds: 36000,
+            odometerStartKm: 80_360,
+            odometerEndKm: 80_412,
+            ambientTempC: 24.5,
+            coldSoakHours: 14.25
+        )
+        let decoded = try JSONDecoder().decode(
+            SessionManifest.self, from: try JSONEncoder().encode(manifest))
+        XCTAssertEqual(decoded.odometerStartKm, 80_360)
+        XCTAssertEqual(decoded.odometerEndKm, 80_412)
+        XCTAssertEqual(decoded.timezoneOffsetSeconds, 36_000)
+        XCTAssertEqual(decoded.ambientTempC, 24.5)
+        XCTAssertEqual(decoded.coldSoakHours, 14.25)
+    }
+
+    /// Odometer is only known at stop, so it must be updatable mid-session.
+    func testOdometerCanBeSetBeforeFinish() throws {
+        let session = RecordingSession()
+        let manifest = SessionManifest(sessionID: "s3", startedAt: WallClock.iso(), appVersion: "t")
+        try session.start(manifest: manifest, root: root)
+        session.updateOdometer(end: 80_412)
+        session.stop(reason: "user")
+
+        let directory = try XCTUnwrap(session.directory)
+        let read = try XCTUnwrap(SessionStore.readManifest(at: directory))
+        XCTAssertEqual(read.odometerEndKm, 80_412)
+    }
+}

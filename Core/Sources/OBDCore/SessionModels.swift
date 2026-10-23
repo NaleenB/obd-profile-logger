@@ -28,6 +28,19 @@ public struct SessionManifest: Codable, Equatable {
     /// "succeeded" or "failed". An empty `supportedPIDs` alone cannot express
     /// the difference between "the car supports nothing" and "we could not ask".
     public var capabilityDiscovery: String?
+    /// SHA-256 of the profile JSON actually used. A profile change alters
+    /// decoding silently, so the hash is what lets two sessions be compared.
+    public var profileHash: String?
+    /// Offset from UTC in seconds, so `wallTime` is unambiguous.
+    public var timezoneOffsetSeconds: Int?
+    /// Odometer at session start and end, from the engine ECU where available.
+    public var odometerStartKm: Int?
+    public var odometerEndKm: Int?
+    /// Intake air temperature measured before the engine was started, used as an
+    /// ambient proxy because this ECU has no ambient-temperature PID.
+    public var ambientTempC: Double?
+    /// Hours since the previous session ended, when known.
+    public var coldSoakHours: Double?
     public var notes: [String]
 
     public init(
@@ -41,6 +54,12 @@ public struct SessionManifest: Codable, Equatable {
         adapterIdentifier: String? = nil,
         supportedPIDs: [String]? = nil,
         capabilityDiscovery: String? = nil,
+        profileHash: String? = nil,
+        timezoneOffsetSeconds: Int? = nil,
+        odometerStartKm: Int? = nil,
+        odometerEndKm: Int? = nil,
+        ambientTempC: Double? = nil,
+        coldSoakHours: Double? = nil,
         notes: [String] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -53,6 +72,12 @@ public struct SessionManifest: Codable, Equatable {
         self.adapterIdentifier = adapterIdentifier
         self.supportedPIDs = supportedPIDs
         self.capabilityDiscovery = capabilityDiscovery
+        self.profileHash = profileHash
+        self.timezoneOffsetSeconds = timezoneOffsetSeconds
+        self.odometerStartKm = odometerStartKm
+        self.odometerEndKm = odometerEndKm
+        self.ambientTempC = ambientTempC
+        self.coldSoakHours = coldSoakHours
         self.notes = notes
     }
 }

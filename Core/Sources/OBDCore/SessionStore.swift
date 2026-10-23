@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Where sessions live and how they are named.
 public enum SessionStore {
@@ -32,6 +33,7 @@ public enum SessionStore {
     public static func createSession(
         root: URL? = nil,
         manifest: SessionManifest,
+        profileData: Data? = nil,
         clock: MonotonicClock = UptimeClock()
     ) throws -> SessionRecorder {
         let base = try root ?? rootDirectory()
@@ -41,7 +43,8 @@ public enum SessionStore {
             throw SessionStoreError.sessionExists(manifest.sessionID)
         }
 
-        return try SessionRecorder(directory: directory, manifest: manifest, clock: clock)
+        return try SessionRecorder(directory: directory, manifest: manifest,
+                                   profileData: profileData, clock: clock)
     }
 
     /// Newest first.
@@ -104,5 +107,15 @@ public enum SessionStoreError: Error, CustomStringConvertible, Equatable {
         switch self {
         case .sessionExists(let id): return "Session \(id) already exists"
         }
+    }
+}
+
+public enum ProfileFingerprint {
+    /// SHA-256 of the profile bytes, hex encoded. Used to prove two sessions
+    /// decoded with the same rules.
+    public static func hash(of data: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: data)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }

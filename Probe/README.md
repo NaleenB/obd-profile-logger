@@ -42,6 +42,23 @@ The tool will:
 
 An explicit `--device` bypasses the "looks like an OBD adapter" heuristic.
 
+## DPF sensor check
+
+The two soot estimators in the ECU disagree by a factor of nine on this car
+(2.6 g/L from fuel quantity, 0.3 g/L from differential pressure). That is either a
+decode fault or a hardware fact. This mode tells you which, in three prompts:
+
+```bash
+./run.sh --dpf-check
+```
+
+1. Ignition on, engine off — the sensor must read within +-2.5 kPa of zero
+2. Start the engine, idle — the reading should rise
+3. Hold about 2500 rpm — it should rise further with exhaust flow
+
+A sensor that never moves cannot produce a soot estimate, and the
+differential-pressure figure should then be treated as unreliable.
+
 ## Other options
 
 | Flag | Purpose |
