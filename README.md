@@ -110,9 +110,24 @@ Research/   how the manufacturer data was obtained
 
 ## Status
 
-Research complete; probe and app working. The recorder and manufacturer panel are
-unit-tested but have not yet been driven on the car. See the roadmap in
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Verified on a real car** (2016 Outlander 2.2 DiD): the probe, the recorder, DPF
+decoding through service `0x21`, DTC scanning across engine and transmission, the
+battery test across a start, and ZIP export. Everything below was measured, not
+simulated.
+
+| | |
+|---|---|
+| Recorded | ~6,000 samples across three sessions |
+| Fault codes | none stored, pending or permanent on either ECU |
+| DPF | soot 2.6 g/L, 123 regenerations, zero short-interval regens |
+| Injector balance | all 20 learning values within ±0.02 ms of a ±0.5 ms spec |
+| Rail pressure | tracked target within ~1 MPa of a ±10 MPa tolerance |
+| Charging | 14.19–14.27 V |
+| Cranking | 10.38–10.90 V against a 9.5 V health line |
+
+**Not yet verified:** the iOS app has only run in the simulator, and two timing
+behaviours — the ten-minute idle disconnect and data-gap events — have not been
+observed in a real session. See the roadmap in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Scope and disclaimer
 
