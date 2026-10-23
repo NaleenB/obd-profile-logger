@@ -25,6 +25,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+      - path: ../profiles/mitsubishi/outlander-2016-4n14.json
+        buildPhase: resources
     dependencies:
       - package: OBDCore
         product: OBDCore
@@ -51,6 +53,8 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      - path: ../profiles/mitsubishi/outlander-2016-4n14.json
+        buildPhase: resources
     dependencies:
       - package: OBDCore
         product: OBDCore

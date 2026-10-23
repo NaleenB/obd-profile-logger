@@ -84,6 +84,18 @@ Three rules that came out of review:
 DTC scanning is a step-at-a-time state machine interleaved with live polling, so
 a multi-second scan never stalls sampling.
 
+## Manufacturer data in the app
+
+The app ships the vehicle profile as a bundle resource and decodes service `0x21`
+blocks from it. Nothing about a specific manufacturer is compiled in: the tile
+list, byte offsets and scaling all come from JSON.
+
+A full sweep of 76 local identifiers is stepped one per polling iteration, so it
+refreshes in the background over about a minute and never blocks live sampling.
+Values are cached by `lid:name` and only the parameters listed in
+`VehicleProfile.highlightItemNumbers` are shown, keeping the choice reviewable
+rather than inferred from names.
+
 ## Extension points
 
 | Want to add | Change |

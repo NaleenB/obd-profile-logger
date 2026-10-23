@@ -8,7 +8,7 @@ of what matters.
 The goal is preventive. Record continuously, compare against real limits, and
 surface drift before something fails.
 
-**Status:** research complete, probe working, app in progress.
+**Status:** research complete; probe working; app records sessions and reads the manufacturer data list.
 
 ## What makes it different
 
@@ -32,7 +32,7 @@ Vehicle knowledge lives in **JSON profiles**, not code.
 profiles/     one JSON file per vehicle — the extension point
 Core/         models, health rules, profile-driven decoders
 Probe/        macOS CLI: discover what a vehicle supports, capture everything
-App/          SwiftUI for iOS and macOS (in progress)
+App/          SwiftUI for iOS and macOS: live data, recording, export
 tools/        offline generators
 docs/         protocol and design notes
 Research/     how manufacturer data was obtained

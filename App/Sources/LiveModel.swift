@@ -108,6 +108,10 @@ final class LiveModel {
     var dpf: DPFStatus?
     var lastUpdate: Date?
 
+    /// Manufacturer parameters decoded through the vehicle profile.
+    private(set) var manufacturer: [String: DecodedParameter] = [:]
+    private(set) var profile: VehicleProfile?
+
     var recording: RecordingState = .idle
     var lastSessionURL: URL?
     var exportURL: URL?
@@ -119,6 +123,7 @@ final class LiveModel {
 
     private var recorder: SessionRecorder?
     private var scanner: DTCScanner?
+    private var profileIndex = 0
     private var lastScanSignature: String?
     private var iteration = 0
     private var lastDTCStep = Date.distantPast
@@ -127,7 +132,21 @@ final class LiveModel {
     private let dtcScanInterval: TimeInterval = 10
     private let profileID = "mitsubishi-outlander-2016-4n14"
 
+    init() {
+        do {
+            profile = try VehicleProfileLoader.load(named: "outlander-2016-4n14")
+        } catch {
+            notice = "Vehicle profile unavailable: \(error)"
+        }
+    }
+
     var isConnected: Bool { phase == .connected }
+
+    /// Manufacturer values worth showing, ordered by data-list item number.
+    var manufacturerHighlights: [DecodedParameter] {
+        guard let profile else { return [] }
+        return profile.highlights(from: Array(manufacturer.values))
+    }
     var isRecording: Bool { recording.isRecording }
 
     // MARK: - Connection
@@ -288,6 +307,9 @@ final class LiveModel {
                 if Task.isCancelled { return }
                 await stepDTCScan(using: elm)
 
+                if Task.isCancelled { return }
+                await stepProfileScan(using: elm)
+
                 iteration += 1
             }
         }
@@ -366,6 +388,27 @@ final class LiveModel {
         }
 
         record(.dtcSnapshot, details)
+    }
+
+    // MARK: - Manufacturer data
+
+    /// One local identifier per loop, so 76 blocks refresh in the background
+    /// without ever blocking live sampling.
+    private func stepProfileScan(using elm: ELMClient) async {
+        guard let profile, !profile.localIdentifiers.isEmpty else { return }
+        let lid = profile.localIdentifiers[profileIndex % profile.localIdentifiers.count]
+        profileIndex += 1
+
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        let command = String(format: "21%02X", lid)
+        guard let reply = try? await elm.send(command, timeout: 3),
+              let hex = reply.payloadHex,
+              let frame = MUT21Frame(hex: hex)
+        else { return }
+
+        for decoded in profile.decode(frame) {
+            manufacturer[decoded.id] = decoded
+        }
     }
 
     // MARK: - DPF

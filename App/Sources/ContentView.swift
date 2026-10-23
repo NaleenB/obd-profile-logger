@@ -24,6 +24,10 @@ struct ContentView: View {
                 }
             }
 
+            if !model.manufacturerHighlights.isEmpty {
+                manufacturerSection
+            }
+
             if let notice = model.notice {
                 Text(notice)
                     .font(.footnote)
@@ -83,6 +87,36 @@ struct ContentView: View {
         case .idle:
             EmptyView()
         }
+    }
+
+    private var manufacturerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Manufacturer data")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 8) {
+                ForEach(model.manufacturerHighlights) { parameter in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(parameter.name)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text("\(parameter.displayValue) \(parameter.unit ?? "")")
+                                .font(.callout.weight(.medium))
+                                .monospacedDigit()
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var dpfLine: String? {
