@@ -31,7 +31,7 @@ This project does both:
 Verified on the car, not inferred:
 
 ```
-Soot by accumulation        2.6 g/L   (of 12.75 max)
+Soot by accumulation        2.6 g/L   (trigger 9.3 g/L, 310 km since regeneration)
 Distance since regeneration  310 km
 Regeneration count           123
 Short-interval regens          0      <- DPF is healthy

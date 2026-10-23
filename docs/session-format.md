@@ -26,7 +26,7 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | format version (2) |
+| `schemaVersion` | format version (3) |
 | `sessionID` | directory name |
 | `startedAt`, `finishedAt` | wall clock, ISO 8601 |
 | `appVersion` | build that wrote the session |
@@ -47,19 +47,19 @@ and its own presence.
 Standard PID observation (`pid` present):
 
 ```json
-{"schemaVersion":2,"elapsedMs":1234,"wallTime":"2026-10-23T03:21:07.512Z",
+{"schemaVersion":3,"elapsedMs":1234,"wallTime":"2026-10-23T03:21:07.512Z",
  "pid":"23","name":"Rail","value":337.2,"unit":"bar","raw":"41230D2C"}
 ```
 
 Manufacturer observation (`pid` absent, `service`/`lid` present):
 
 ```json
-{"schemaVersion":2,"elapsedMs":9100,"wallTime":"2026-10-23T03:21:16Z",
+{"schemaVersion":3,"elapsedMs":9100,"wallTime":"2026-10-23T03:21:16Z",
  "service":"21","lid":"11","itemNumber":155,
  "name":"Soot loading by summation","value":2.6,"unit":"g/L","raw":"6111141F34061D"}
 ```
 
-Schema 2 makes `pid` optional precisely so manufacturer data can be recorded
+Schema 2 made `pid` optional precisely so manufacturer data can be recorded
 without being forced into a standard PID field.
 
 | Field | Meaning |
