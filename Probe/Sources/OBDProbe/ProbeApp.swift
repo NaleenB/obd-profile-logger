@@ -1,5 +1,6 @@
 import Foundation
 import OBDCore
+import OBDLink
 import Darwin
 
 @main

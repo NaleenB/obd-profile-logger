@@ -1,10 +1,27 @@
 import Foundation
 
+/// Anything that can answer an ELM327 command. Lets the probe run against a
+/// recorded session instead of a car.
+public protocol ELMSource {
+    func send(_ command: String, timeout: TimeInterval) async throws -> ELMResponse
+}
+
+public extension ELMSource {
+    func send(_ command: String) async throws -> ELMResponse {
+        try await send(command, timeout: 3.0)
+    }
+}
+
+/// Anything that can record a raw ELM327 exchange.
+public protocol ELMLogger: AnyObject {
+    func raw(_ record: [String: Any])
+}
+
 /// A parsed ELM327 reply.
-struct ELMResponse {
+public struct ELMResponse {
     let command: String
     let raw: String
-    let lines: [String]
+    public let lines: [String]
 
     static let statusPhrases = [
         "SEARCHING...",
@@ -29,8 +46,8 @@ struct ELMResponse {
         "ACT ALERT"
     ]
 
-    var promptSeen: Bool { raw.contains(">") }
-    var isEmpty: Bool { lines.isEmpty }
+    public var promptSeen: Bool { raw.contains(">") }
+    public var isEmpty: Bool { lines.isEmpty }
 
     /// Every response frame, as hex, in the order the adapter returned them.
     ///
@@ -38,7 +55,7 @@ struct ELMResponse {
     /// off, every module that answers a broadcast mode 01 request appears here. So
     /// frames are kept separate and never concatenated — joining them invents DTCs
     /// and corrupts multi-byte values.
-    var payloadFrames: [String] {
+    public var payloadFrames: [String] {
         let hasFramePrefixes = lines.contains {
             $0.range(of: "^[0-9A-F]:", options: [.regularExpression, .caseInsensitive]) != nil
         }
@@ -85,30 +102,30 @@ struct ELMResponse {
     }
 
     /// First response frame. Use this for single-module queries.
-    var payloadHex: String? { payloadFrames.first }
+    public var payloadHex: String? { payloadFrames.first }
 
-    var payloadBytes: [UInt8]? {
+    public var payloadBytes: [UInt8]? {
         guard let hex = payloadHex else { return nil }
         return bytesFromHex(hex)
     }
 
     /// Data bytes of the first frame, with the 2-byte mode/PID echo removed.
-    var dataBytes: [UInt8]? {
+    public var dataBytes: [UInt8]? {
         guard let bytes = payloadBytes, bytes.count > 2 else { return nil }
         return Array(bytes[2...])
     }
 
     /// True when more than one module answered the request.
-    var hasMultipleFrames: Bool { payloadFrames.count > 1 }
+    public var hasMultipleFrames: Bool { payloadFrames.count > 1 }
 
-    var statusSummary: String {
+    public var statusSummary: String {
         let frames = payloadFrames
         if !frames.isEmpty { return frames.joined(separator: " | ") }
         let meaningful = lines.filter { !$0.isEmpty }
         return meaningful.isEmpty ? "(empty reply)" : meaningful.joined(separator: " / ")
     }
 
-    var failed: Bool {
+    public var failed: Bool {
         let joined = lines.joined(separator: " ").uppercased()
         return ["NO DATA", "UNABLE TO CONNECT", "STOPPED", "ERROR", "?"].contains {
             joined.contains($0)
@@ -116,17 +133,17 @@ struct ELMResponse {
     }
 }
 
-final class ELMClient: ELMSource {
+public final class ELMClient: ELMSource {
     private let transport: BLETransport
-    private let logger: SessionLogger?
+    private let logger: ELMLogger?
 
-    init(transport: BLETransport, logger: SessionLogger?) {
+    public init(transport: BLETransport, logger: ELMLogger?) {
         self.transport = transport
         self.logger = logger
     }
 
     @discardableResult
-    func send(_ command: String, timeout: TimeInterval = 3.0) async throws -> ELMResponse {
+    public func send(_ command: String, timeout: TimeInterval = 3.0) async throws -> ELMResponse {
         let started = Date()
         let raw = try await transport.request(command, timeout: timeout)
         let elapsed = Int(Date().timeIntervalSince(started) * 1000)
@@ -145,7 +162,7 @@ final class ELMClient: ELMSource {
         return response
     }
 
-    static func parse(command: String, raw: String, elapsedMS: Int = 0) -> ELMResponse {
+    public static func parse(command: String, raw: String, elapsedMS: Int = 0) -> ELMResponse {
         var text = raw
         if let prompt = text.range(of: ">", options: .backwards) {
             text = String(text[..<prompt.lowerBound])

@@ -1,16 +1,5 @@
 import Foundation
-
-/// Anything that can answer an ELM327 command. Lets the probe run against a
-/// recorded session instead of a car.
-protocol ELMSource {
-    func send(_ command: String, timeout: TimeInterval) async throws -> ELMResponse
-}
-
-extension ELMSource {
-    func send(_ command: String) async throws -> ELMResponse {
-        try await send(command, timeout: 3.0)
-    }
-}
+import OBDLink
 
 /// Replays a `raw_log.ndjson` captured by an earlier run.
 ///

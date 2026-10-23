@@ -6,3 +6,6 @@ results/
 .DS_Store
 DerivedData/
 .research/
+App/*.xcodeproj/
+App/Info-*.plist
+App/build/

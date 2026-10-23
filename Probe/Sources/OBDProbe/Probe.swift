@@ -1,5 +1,6 @@
 import Foundation
 import OBDCore
+import OBDLink
 
 struct PIDProbe {
     let pid: UInt8

@@ -1,4 +1,5 @@
 import Foundation
+import OBDLink
 
 // MARK: - Output
 
@@ -14,36 +15,6 @@ func sayErr(_ s: String) {
 func sayInline(_ s: String) {
     print(s, terminator: "")
     fflush(stdout)
-}
-
-// MARK: - Remembered adapter
-
-/// These dongles frequently advertise neither a local name nor any service UUID,
-/// so name matching is unreliable. Once we have identified one by talking to it,
-/// remember its identifier so later runs connect instantly.
-enum KnownAdapter {
-    private static var fileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".obdlogger", isDirectory: true)
-            .appendingPathComponent("adapter.json")
-    }
-
-    static func load() -> (uuid: UUID, name: String)? {
-        guard let data = try? Data(contentsOf: fileURL),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              let raw = object["uuid"], let uuid = UUID(uuidString: raw)
-        else { return nil }
-        return (uuid, object["name"] ?? "")
-    }
-
-    static func save(uuid: UUID, name: String) {
-        let directory = fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let object = ["uuid": uuid.uuidString, "name": name]
-        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
-        else { return }
-        try? data.write(to: fileURL)
-    }
 }
 
 func rule(_ title: String) {
@@ -109,7 +80,7 @@ func looksLikeHex(_ s: String) -> Bool {
 
 // MARK: - Session logger
 
-final class SessionLogger {
+final class SessionLogger: ELMLogger {
     let directory: URL
     private let rawURL: URL
     private let handle: FileHandle

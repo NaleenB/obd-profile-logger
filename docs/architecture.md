@@ -4,13 +4,19 @@
 
 ```
 profiles/     Vehicle knowledge as data. The extension point for new cars.
-Core/         Platform-neutral Swift: models, health rules, decoders.
-Probe/        macOS CLI used to discover what a vehicle supports.
-App/          SwiftUI app for iOS and macOS. (planned)
-tools/        Offline generators and extraction helpers.
-docs/         Protocol and design notes, language-agnostic.
-Research/     How the manufacturer data was obtained.
+Core/         OBDCore  — models, health rules, decoders (no I/O)
+Link/         OBDLink  — BLE transport and ELM327 client (Apple platforms)
+App/          SwiftUI app for iOS and macOS
+Probe/        macOS CLI used to discover what a vehicle supports
+tools/        Offline generators and extraction helpers
+docs/         Protocol and design notes, language-agnostic
+Research/     How the manufacturer data was obtained
 ```
+
+`Core` and `Link` are separate Swift packages so a different front end can adopt
+them independently. The app project is generated from `App/project.yml` with
+XcodeGen, so the repository stores the intent rather than a 3,000-line
+`project.pbxproj`.
 
 The important boundary is **`profiles/` versus code**. Everything that differs
 between vehicles lives in JSON. Code implements mechanism, not vehicle facts.

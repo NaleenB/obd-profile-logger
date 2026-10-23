@@ -1,7 +1,7 @@
 import Foundation
 import CoreBluetooth
 
-enum BLEError: Error, CustomStringConvertible {
+public enum BLEError: Error, CustomStringConvertible {
     case unavailable(String)
     case noDevice(String)
     case notConnected
@@ -9,7 +9,7 @@ enum BLEError: Error, CustomStringConvertible {
     case timeout(String)
     case writeFailed(String)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .unavailable(let s): return "Bluetooth unavailable: \(s)"
         case .noDevice(let s): return "No matching adapter found. \(s)"
@@ -21,20 +21,20 @@ enum BLEError: Error, CustomStringConvertible {
     }
 }
 
-struct SerialPort {
-    let label: String
-    let write: CBCharacteristic
-    let notify: CBCharacteristic
+public struct SerialPort {
+    public let label: String
+    public let write: CBCharacteristic
+    public let notify: CBCharacteristic
     /// Chosen from the characteristic's advertised properties, not assumed:
     /// some modules expose write-without-response only.
-    let writeType: CBCharacteristicWriteType
+    public let writeType: CBCharacteristicWriteType
 }
 
 /// Talks to a BLE OBD-II dongle.
 ///
 /// Deliberately dumb about ELM327 semantics: it moves bytes and reassembles
 /// responses until the `>` prompt. ELM-level parsing lives in ELMClient.
-final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     static let fff0 = CBUUID(string: "FFF0")
     static let fff1 = CBUUID(string: "FFF1")
@@ -44,12 +44,12 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     static let microchipWrite = CBUUID(string: "49535343-6DAA-4D02-ABF6-19569ACA69FE")
     static let deviceInfoService = CBUUID(string: "180A")
 
-    struct Candidate {
-        let peripheral: CBPeripheral
-        let name: String
-        let score: Int
-        let rssi: Int
-        let detail: String
+    public struct Candidate {
+        public let peripheral: CBPeripheral
+        public let name: String
+        public let score: Int
+        public let rssi: Int
+        public let detail: String
     }
 
     private var central: CBCentralManager?
@@ -70,16 +70,19 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private var candidates: [Candidate] = []
     private var servicesRemaining = 0
     private var mergedServices: [UUID: Set<CBUUID>] = [:]
-    private(set) var lastScanDetails: [[String: Any]] = []
+    public private(set) var lastScanDetails: [[String: Any]] = []
 
-    private(set) var adapterName = ""
-    private(set) var adapterIdentifier = ""
-    private(set) var deviceInfo: [String: String] = [:]
-    private(set) var discoveredNames: [String] = []
+    /// Called for non-fatal problems the caller may want to surface.
+    public var onWarning: ((String) -> Void)?
+
+    public private(set) var adapterName = ""
+    public private(set) var adapterIdentifier = ""
+    public private(set) var deviceInfo: [String: String] = [:]
+    public private(set) var discoveredNames: [String] = []
 
     // MARK: - Lifecycle
 
-    func start() async throws {
+    public func start() async throws {
         let central = CBCentralManager(
             delegate: self,
             queue: nil,
@@ -99,14 +102,14 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         }
     }
 
-    func shutdown() {
+    public func shutdown() {
         central?.stopScan()
         if let peripheral, peripheral.state != .disconnected {
             central?.cancelPeripheralConnection(peripheral)
         }
     }
 
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         lock.lock()
         let cont = powerCont
         powerCont = nil
@@ -131,7 +134,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
 
     // MARK: - Discovery
 
-    func scan(seconds: TimeInterval) async throws -> [Candidate] {
+    public func scan(seconds: TimeInterval) async throws -> [Candidate] {
         guard let central else { throw BLEError.unavailable("not started") }
 
         candidates = []
@@ -176,7 +179,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         cont?.resume(returning: list)
     }
 
-    func findAdapter(scanSeconds: TimeInterval, nameFilter: String?) async throws -> Candidate {
+    public func findAdapter(scanSeconds: TimeInterval, nameFilter: String?) async throws -> Candidate {
         let list = try await scan(seconds: scanSeconds)
 
         // A previously working adapter is the strongest possible signal: these
@@ -213,13 +216,13 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         return best
     }
 
-    func candidateList(seconds: TimeInterval) async throws -> [String] {
+    public func candidateList(seconds: TimeInterval) async throws -> [String] {
         let list = try await scan(seconds: seconds)
         return list.sorted { $0.score > $1.score }.map { $0.detail }
     }
 
     /// Drops the current link so another candidate can be tried.
-    func disconnect() {
+    public func disconnect() {
         if let peripheral {
             central?.cancelPeripheralConnection(peripheral)
         }
@@ -237,7 +240,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         stalled?.resume(throwing: BLEError.notConnected)
     }
 
-    func centralManager(
+    public func centralManager(
         _ central: CBCentralManager,
         didDiscover peripheral: CBPeripheral,
         advertisementData: [String: Any],
@@ -274,7 +277,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
 
     // MARK: - Connection
 
-    func connect(_ candidate: Candidate) async throws -> SerialPort {
+    public func connect(_ candidate: Candidate) async throws -> SerialPort {
         guard let central else { throw BLEError.unavailable("not started") }
 
         adapterName = candidate.name
@@ -292,11 +295,11 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         }
     }
 
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+    public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         peripheral.discoverServices(nil)
     }
 
-    func centralManager(
+    public func centralManager(
         _ central: CBCentralManager,
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
@@ -304,7 +307,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         failReady(BLEError.unavailable("could not connect: \(error?.localizedDescription ?? "unknown")"))
     }
 
-    func centralManager(
+    public func centralManager(
         _ central: CBCentralManager,
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
@@ -328,7 +331,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
 
     // MARK: - Service / characteristic discovery
 
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+    public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
             failReady(BLEError.unavailable("service discovery failed: \(error.localizedDescription)"))
             return
@@ -346,13 +349,13 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         }
     }
 
-    func peripheral(
+    public func peripheral(
         _ peripheral: CBPeripheral,
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
         if let error {
-            sayErr("  ! characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
+            onWarning?("characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
         }
 
         if service.uuid == Self.deviceInfoService {
@@ -409,7 +412,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         peripheral.setNotifyValue(true, for: selected.notify)
     }
 
-    func peripheral(
+    public func peripheral(
         _ peripheral: CBPeripheral,
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
@@ -427,7 +430,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         cont?.resume(returning: port)
     }
 
-    func peripheral(
+    public func peripheral(
         _ peripheral: CBPeripheral,
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
@@ -484,7 +487,7 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     }
 
     /// Sends a command and waits for the `>` prompt. Fully serialised.
-    func request(_ command: String, timeout: TimeInterval) async throws -> String {
+    public func request(_ command: String, timeout: TimeInterval) async throws -> String {
         guard let peripheral, let port else { throw BLEError.notConnected }
 
         let payload = command.hasSuffix("\r") ? command : command + "\r"
