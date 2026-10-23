@@ -73,6 +73,8 @@ final class LiveModel {
     /// When a command is outstanding. A request whose continuation never resumes
     /// leaves this set, which is how a suspended-then-resumed link is detected.
     private var inFlightSince: Date?
+    private var regenDetector = RegenDetector()
+    private var regenSootAtStart: Double?
     private var stallWatchdog: Task<Void, Never>?
     private var connectedAt: Date?
 
@@ -457,6 +459,13 @@ final class LiveModel {
             return
         }
         reportGapTransition(gapMonitor.finish(now: Date()))
+        if case .ended(let duration, let peak)? = regenDetector.finish(at: Date()) {
+            session.event(.regenEnded, [
+                "durationSeconds": String(Int(duration)),
+                "peakTempC": String(format: "%.0f", peak),
+                "truncated": "true"
+            ])
+        }
         emitCachedSnapshot(phase: "end")
         session.updateOdometer(end: odometerKm)
         let result = session.stop(reason: reason)
@@ -840,6 +849,7 @@ final class LiveModel {
 
         for decoded in profile.decode(frame) {
             readings.setManufacturer(decoded, at: Date())
+            if decoded.itemNumber == 119 { trackRegeneration(dpfTemperature: decoded.value) }
             if isRecording {
                 let written = session.manufacturerSample(
                     lid: decoded.lid,
@@ -970,6 +980,38 @@ final class LiveModel {
               let first = bytes.first
         else { return nil }
         return Double(first) - 40
+    }
+
+    /// Regeneration is detected from the filter temperature rather than the ECU's
+    /// flag: the temperature lives in the live block at several Hz, while the flag
+    /// block refreshes once a minute and a half.
+    private func trackRegeneration(dpfTemperature: Double) {
+        switch regenDetector.ingest(tempC: dpfTemperature, at: Date()) {
+        case .started(let temp):
+            regenSootAtStart = manufacturer.values.first { $0.itemNumber == 155 }?.value
+            var details: [String: String] = ["dpfTempC": String(format: "%.0f", temp)]
+            if let soot = regenSootAtStart { details["sootBeforeGL"] = String(format: "%.2f", soot) }
+            if let odometerKm { details["odometerKm"] = String(odometerKm) }
+            session.event(.regenStarted, details)
+
+        case .ended(let duration, let peak):
+            var details: [String: String] = [
+                "durationSeconds": String(Int(duration)),
+                "peakTempC": String(format: "%.0f", peak)
+            ]
+            if let soot = regenSootAtStart { details["sootBeforeGL"] = String(format: "%.2f", soot) }
+            if let after = manufacturer.values.first(where: { $0.itemNumber == 155 })?.value {
+                details["sootAfterGL"] = String(format: "%.2f", after)
+            }
+            if let before = regenSootAtStart {
+                details["sootBurnedGL"] = String(format: "%.2f", max(0, before - (Double(details["sootAfterGL"] ?? "") ?? before)))
+            }
+            session.event(.regenEnded, details)
+            regenSootAtStart = nil
+
+        case nil:
+            break
+        }
     }
 
     // MARK: - DPF

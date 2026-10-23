@@ -103,6 +103,14 @@ dongle never loses power; only the ECU sleeps.
 
 `adapter_connected` is written after the session starts, so it always appears.
 
+`regen_started` and `regen_ended` bracket a DPF regeneration. Detection uses the
+filter temperature from the live block (above 450 °C starts, below 300 °C for ten
+seconds ends) rather than the ECU's own flag, because the flag sits in a block
+that refreshes once per ~90 s sweep while the temperature is sampled several
+times a second. `regen_ended` carries the duration, peak temperature, and the soot
+figure before and after where available. A regeneration still running when the
+session ends is closed with `truncated: true` rather than dropped.
+
 `adapter_disconnected` during a session means the *link* dropped (out of range,
 unplugged, module reset), which is a different event and stops the recording. Without them a log
 looks like the engine did nothing rather than that the app lost contact.

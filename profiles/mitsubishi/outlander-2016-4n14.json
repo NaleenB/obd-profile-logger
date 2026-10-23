@@ -6,6 +6,12 @@
   "year": 2016,
   "engine": "4N14 2.2 DiD",
   "market": "AU",
+  "calibrationIDs": [
+    "1860C97201"
+  ],
+  "vinPrefixes": [
+    "JMFXLGF6W"
+  ],
   "service": {
     "readByLocalIdentifier": "21",
     "readByIdentifier": null
@@ -596,7 +602,7 @@
           "name": "Mode of regeneration request",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -651,7 +657,7 @@
           "name": "Last regeneration mode",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 2,
@@ -944,7 +950,7 @@
           "name": "Regeneration mode 2 times before",
           "byte": 5,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 2,
@@ -956,7 +962,7 @@
           "name": "Regeneration mode 3 times before",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 2,
@@ -973,7 +979,7 @@
           "name": "Regeneration mode 4 times before",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 2,
@@ -985,7 +991,7 @@
           "name": "Regeneration mode 5 times before",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 2,
@@ -1454,7 +1460,7 @@
           "name": "Judg. of Stable for SOOT loading",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -1491,7 +1497,7 @@
           "name": "Judgement of DPF clogging",
           "byte": 7,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -1876,7 +1882,7 @@
           "name": "Control relay",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1888,7 +1894,7 @@
           "name": "Engine check light",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1900,7 +1906,7 @@
           "name": "Ignition switch",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1912,7 +1918,7 @@
           "name": "Starter switch",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1924,7 +1930,7 @@
           "name": "Neutral switch",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1936,7 +1942,7 @@
           "name": "MT clutch switch",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 186,
@@ -1948,7 +1954,7 @@
           "name": "P/S switch",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 128,
@@ -1960,7 +1966,7 @@
           "name": "Normally closed brake switch",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 128,
@@ -1972,7 +1978,7 @@
           "name": "Brake light switch",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 128,
@@ -1984,7 +1990,7 @@
           "name": "Glow light",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 5,
@@ -1996,7 +2002,7 @@
           "name": "Glow plug relay",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 5,
@@ -2008,7 +2014,7 @@
           "name": "OCV (MIVEC)",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 5,
@@ -2020,7 +2026,7 @@
           "name": "EGR Cooler Bypass Solenoid",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 5,
@@ -2032,7 +2038,7 @@
           "name": "A/C SW1",
           "byte": 5,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2044,7 +2050,7 @@
           "name": "A/C relay",
           "byte": 5,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2056,7 +2062,7 @@
           "name": "Fuel filter stuffed switch",
           "byte": 5,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2068,7 +2074,7 @@
           "name": "Intank Pump Relay",
           "byte": 5,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2080,7 +2086,7 @@
           "name": "Cruise main switch",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2092,7 +2098,7 @@
           "name": "Cruise cancel switch",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2104,7 +2110,7 @@
           "name": "Cruise set switch",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2116,7 +2122,7 @@
           "name": "Cruise resume switch",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2128,7 +2134,7 @@
           "name": "Cruise control under operating",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2140,7 +2146,7 @@
           "name": "DPF light",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2152,7 +2158,7 @@
           "name": "Starter relay",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2164,7 +2170,7 @@
           "name": "DPF light(yellow)",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2540,7 +2546,7 @@
           "name": "DPF regeneration operating",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2552,7 +2558,7 @@
           "name": "S purge operating",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2564,7 +2570,7 @@
           "name": "NOx purge operating",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2576,7 +2582,7 @@
           "name": "A/F sensor active",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2588,7 +2594,7 @@
           "name": "S purge request",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2600,7 +2606,7 @@
           "name": "DPF regeneration request",
           "byte": 2,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2612,7 +2618,7 @@
           "name": "Water Level SW",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 97,
@@ -2624,7 +2630,7 @@
           "name": "Oil Pressure SW",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 97,
@@ -2636,7 +2642,7 @@
           "name": "Battery current SNSR.calibration",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 97,
@@ -2648,7 +2654,7 @@
           "name": "Battery degrade judgement flag",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 97,
@@ -2660,7 +2666,7 @@
           "name": "Battery full-charge mode flag",
           "byte": 3,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 97,
@@ -2672,7 +2678,7 @@
           "name": "Amount of HC is over in D-HCT",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2684,7 +2690,7 @@
           "name": "Active Warm Up Under Operating",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2696,7 +2702,7 @@
           "name": "ASLF Main SW",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -2708,7 +2714,7 @@
           "name": "Engine system check display request",
           "byte": 4,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -3769,7 +3775,7 @@
           "name": "Small qt. pressure Not Complete",
           "byte": 6,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 0,
@@ -3875,7 +3881,7 @@
           "name": "Condition of SQL",
           "byte": 15,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 32,
@@ -3887,7 +3893,7 @@
           "name": "Water temp. condition of SQL",
           "byte": 15,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 32,
@@ -3899,7 +3905,7 @@
           "name": "Fuel temp. condition of SQL",
           "byte": 15,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 32,
@@ -3911,7 +3917,7 @@
           "name": "AT Oil temp. condition of SQL",
           "byte": 15,
           "length": 1,
-          "factor": 0.0,
+          "factor": 1.0,
           "offset": 0.0,
           "observed": {
             "raw": 32,
@@ -3933,11 +3939,5 @@
         }
       ]
     }
-  ],
-  "calibrationIDs": [
-    "1860C97201"
-  ],
-  "vinPrefixes": [
-    "JMFXLGF6W"
   ]
 }

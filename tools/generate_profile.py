@@ -153,12 +153,17 @@ def main():
         for param in qual["params"]:
             if param["byte"] < 0:
                 continue
+            # Enumerations and flags carry factor 0 in the source data because
+            # they are not scaled numbers. Passing raw through (factor 1) is what
+            # makes a state flag able to report anything but zero.
+            factor = param["factor"] if param["factor"] != 0 else 1.0
+
             entry = {
                 "itemNumber": int(item_no) if item_no.isdigit() else None,
                 "name": label,
                 "byte": param["byte"],
                 "length": param["length"],
-                "factor": param["factor"],
+                "factor": factor,
                 "offset": param["offset"],
             }
             unit = UNIT_NAMES.get(param["unitId"])
