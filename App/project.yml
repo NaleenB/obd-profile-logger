@@ -15,8 +15,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.1.1"
+    CURRENT_PROJECT_VERSION: "2"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 
 targets:
@@ -39,6 +39,8 @@ targets:
       path: Info-macOS.plist
       properties:
         CFBundleName: OBDLogger
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "15.0"
         NSBluetoothAlwaysUsageDescription: OBDLogger connects to your OBD-II adapter over Bluetooth to read vehicle data.
         NSBluetoothPeripheralUsageDescription: OBDLogger connects to your OBD-II adapter over Bluetooth to read vehicle data.
@@ -71,6 +73,8 @@ targets:
       path: Info-iOS.plist
       properties:
         CFBundleName: OBDLogger
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

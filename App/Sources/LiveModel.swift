@@ -1111,6 +1111,13 @@ final class LiveModel {
 
     // MARK: - Helpers
 
+    /// Shown in the UI so a screenshot is enough to identify the build.
+    var versionDescription: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "OBDLogger \(version) (\(build))"
+    }
+
     private static var appVersion: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
     }

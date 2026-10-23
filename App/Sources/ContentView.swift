@@ -238,6 +238,11 @@ struct ContentView: View {
 
             }
 
+            Text(model.versionDescription)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
             HStack(spacing: 12) {
                 Button("Sessions") {
                     showingSessions = true
