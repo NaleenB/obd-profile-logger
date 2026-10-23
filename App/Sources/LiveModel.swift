@@ -122,14 +122,31 @@ final class LiveModel {
         }
     }
 
-    private func resolveProfile(manufacturerAvailable: Bool, identity: VehicleIdentity) {
+    private func resolveProfile(
+        manufacturerAvailable: Bool,
+        identity: VehicleIdentity,
+        using elm: ELMClient
+    ) async {
         guard profileSelection == "auto" else {
             loadProfile(id: profileSelection)
+            profileMatchMethod = "manual"
             return
         }
         let all = availableProfiles.compactMap {
             try? ProfileCatalog.load(id: resourceName(for: $0.id))
         }
+        // With no identity, ask the car a question only the right offsets can
+        // answer: decode "engine speed" from the manufacturer block and see
+        // whether it agrees with the ECU's own rpm.
+        if manufacturerAvailable, !identityResolved {
+            if let matched = await identifyByAgreement(among: all, using: elm) {
+                loadProfile(id: matched.id)
+                profileMatchMethod = "agreement"
+                notice = "Identified \(matched.model) by matching manufacturer data against live readings."
+                return
+            }
+        }
+
         var chosen = ProfileCatalog.automaticID(
             manufacturerAvailable: manufacturerAvailable,
             identity: identity,
@@ -143,12 +160,78 @@ final class LiveModel {
         let specific = all.filter { $0.manufacturer != "Generic" }
         if manufacturerAvailable, unknownIdentity, chosen == "generic-iso15765-can", specific.count == 1 {
             chosen = specific[0].id
+            profileMatchMethod = "assumed"
             notice = "Calibration could not be read, so \(specific[0].model) is assumed. Change it in the profile menu if that is wrong."
         } else if manufacturerAvailable, chosen == "generic-iso15765-can" {
+            profileMatchMethod = "generic"
             notice = "This car answers a manufacturer service, but no profile matches its calibration. Using generic OBD only."
+        } else if chosen != "generic-iso15765-can" {
+            profileMatchMethod = identity.calibrationID != nil ? "calibration" : "vin"
         }
 
         loadProfile(id: chosen ?? ProfileCatalog.defaultID)
+    }
+
+    /// How the active profile was chosen: calibration, vin, agreement, assumed,
+    /// or manual. Recorded in the manifest so a wrong decode can be traced.
+    private(set) var profileMatchMethod: String = "default"
+
+    private func identifyByAgreement(among profiles: [VehicleProfile], using elm: ELMClient) async -> VehicleProfile? {
+        let specifics = profiles.filter { $0.manufacturer != "Generic" }
+        guard !specifics.isEmpty else { return nil }
+
+        // Standard values the car reports independently.
+        var standardRPM: Double?
+        if let reply = try? await elm.send("010C", timeout: 3),
+           let hex = reply.payloadHex, hex.hasPrefix("410C"),
+           let bytes = LiveModel.bytes(String(hex.dropFirst(4))), bytes.count >= 2 {
+            standardRPM = (Double(bytes[0]) * 256 + Double(bytes[1])) / 4
+        }
+        var standardCoolant: Double?
+        if let reply = try? await elm.send("0105", timeout: 3),
+           let hex = reply.payloadHex, hex.hasPrefix("4105"),
+           let bytes = LiveModel.bytes(String(hex.dropFirst(4))), let first = bytes.first {
+            standardCoolant = Double(first) - 40
+        }
+        // Needs the engine turning, or every profile agrees on zero.
+        guard let standardRPM, standardRPM > 400 else { return nil }
+
+        var frames: [UInt8: MUT21Frame] = [:]
+        for lid in [UInt8(0x01), 0x02, 0x03] {
+            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3)
+            if let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) { frames[lid] = frame }
+        }
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        var best: (profile: VehicleProfile, evidence: ProfileEvidence)?
+        for profile in specifics {
+            var manufacturerRPM: Double?
+            var manufacturerCoolant: Double?
+            var odometer: Double?
+            for frame in frames.values {
+                for value in profile.decode(frame) {
+                    switch value.itemNumber {
+                    case 2: manufacturerRPM = value.value
+                    case 7: manufacturerCoolant = value.value
+                    case 145: odometer = value.value
+                    default: break
+                    }
+                }
+            }
+            let evidence = ProfileEvidence(
+                manufacturerRPM: manufacturerRPM,
+                standardRPM: standardRPM,
+                manufacturerCoolant: manufacturerCoolant,
+                standardCoolant: standardCoolant,
+                odometerKm: odometer
+            )
+            guard ProfileMatcher.isConvincing(evidence) else { continue }
+            if best == nil || ProfileMatcher.score(evidence) > ProfileMatcher.score(best!.evidence) {
+                best = (profile, evidence)
+            }
+        }
+        return best?.profile
     }
 
     /// VIN and calibration ID, used to decide whether a profile's byte offsets
@@ -314,7 +397,8 @@ final class LiveModel {
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
                 identity = await readIdentity(using: client)
                 identityResolved = identity.calibrationID != nil || identity.vin != nil
-                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable, identity: identity)
+                await resolveProfile(manufacturerAvailable: manufacturerServiceAvailable,
+                                     identity: identity, using: client)
 
                 await discoverCapabilities(using: client)
                 rebuildSignalList()
@@ -497,6 +581,7 @@ final class LiveModel {
                 ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
                 : nil,
             capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            profileMatch: profileMatchMethod,
             profileHash: profileHash,
             timezoneOffsetSeconds: TimeZone.current.secondsFromGMT(),
             odometerStartKm: odometerKm,
@@ -830,7 +915,8 @@ final class LiveModel {
             identity = await readIdentity(using: elm)
             identityResolved = identity.calibrationID != nil || identity.vin != nil
             if identityResolved {
-                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable, identity: identity)
+                await resolveProfile(manufacturerAvailable: manufacturerServiceAvailable,
+                                     identity: identity, using: elm)
                 rebuildSignalList()
             }
         }

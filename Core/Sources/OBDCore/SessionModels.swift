@@ -28,6 +28,9 @@ public struct SessionManifest: Codable, Equatable {
     /// "succeeded" or "failed". An empty `supportedPIDs` alone cannot express
     /// the difference between "the car supports nothing" and "we could not ask".
     public var capabilityDiscovery: String?
+    /// How the vehicle profile was chosen: calibration, vin, agreement, assumed,
+    /// generic or manual. A wrong decode can be traced from this.
+    public var profileMatch: String?
     /// SHA-256 of the profile JSON actually used. A profile change alters
     /// decoding silently, so the hash is what lets two sessions be compared.
     public var profileHash: String?
@@ -54,6 +57,7 @@ public struct SessionManifest: Codable, Equatable {
         adapterIdentifier: String? = nil,
         supportedPIDs: [String]? = nil,
         capabilityDiscovery: String? = nil,
+        profileMatch: String? = nil,
         profileHash: String? = nil,
         timezoneOffsetSeconds: Int? = nil,
         odometerStartKm: Int? = nil,
@@ -72,6 +76,7 @@ public struct SessionManifest: Codable, Equatable {
         self.adapterIdentifier = adapterIdentifier
         self.supportedPIDs = supportedPIDs
         self.capabilityDiscovery = capabilityDiscovery
+        self.profileMatch = profileMatch
         self.profileHash = profileHash
         self.timezoneOffsetSeconds = timezoneOffsetSeconds
         self.odometerStartKm = odometerStartKm
