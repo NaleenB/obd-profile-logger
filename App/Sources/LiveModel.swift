@@ -59,6 +59,9 @@ final class LiveModel {
     private var batteryLogged = false
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
+    private var identity = VehicleIdentity()
+    private var identityResolved = false
+    private var identityRetried = false
     private var odometerKm: Int?
     private var lastOdometerRead = Date.distantPast
     private var ambientTempC: Double?
@@ -67,6 +70,10 @@ final class LiveModel {
         UserDefaults.standard.object(forKey: "lastSessionEnd") as? Date
     private var intentionalDisconnect = false
     private let watchdog = IdleWatchdog(timeout: 600)
+    /// When a command is outstanding. A request whose continuation never resumes
+    /// leaves this set, which is how a suspended-then-resumed link is detected.
+    private var inFlightSince: Date?
+    private var stallWatchdog: Task<Void, Never>?
     private var connectedAt: Date?
 
     private var scanner: DTCScanner?
@@ -119,17 +126,25 @@ final class LiveModel {
         let all = availableProfiles.compactMap {
             try? ProfileCatalog.load(id: resourceName(for: $0.id))
         }
-        let chosen = ProfileCatalog.automaticID(
+        var chosen = ProfileCatalog.automaticID(
             manufacturerAvailable: manufacturerAvailable,
             identity: identity,
             among: all
         )
-        loadProfile(id: chosen ?? ProfileCatalog.defaultID)
 
-        // Say so rather than silently decoding nothing useful.
-        if manufacturerAvailable, chosen == "generic-iso15765-can" {
+        // Calibration and VIN can be unreadable on the first attempt, especially
+        // with the ignition still off. Unknown identity is not the same as a
+        // mismatch: if there is exactly one specific profile, use it and say so.
+        let unknownIdentity = !identityResolved
+        let specific = all.filter { $0.manufacturer != "Generic" }
+        if manufacturerAvailable, unknownIdentity, chosen == "generic-iso15765-can", specific.count == 1 {
+            chosen = specific[0].id
+            notice = "Calibration could not be read, so \(specific[0].model) is assumed. Change it in the profile menu if that is wrong."
+        } else if manufacturerAvailable, chosen == "generic-iso15765-can" {
             notice = "This car answers a manufacturer service, but no profile matches its calibration. Using generic OBD only."
         }
+
+        loadProfile(id: chosen ?? ProfileCatalog.defaultID)
     }
 
     /// VIN and calibration ID, used to decide whether a profile's byte offsets
@@ -173,7 +188,11 @@ final class LiveModel {
         UserDefaults.standard.set(id, forKey: "profileSelection")
         if id != "auto" { loadProfile(id: id) }
         if isConnected {
-            notice = "Reconnect to apply the new profile."
+            // Service 0x21 blocks can be decoded immediately with different
+            // offsets; only the protocol and signal list need a reconnect.
+            readings.clearManufacturer()
+            rebuildSignalList()
+            notice = "Profile applied. Reconnect to change protocol or signal list."
         }
     }
 
@@ -298,7 +317,8 @@ final class LiveModel {
                 }
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
-                let identity = await readIdentity(using: client)
+                identity = await readIdentity(using: client)
+                identityResolved = identity.calibrationID != nil || identity.vin != nil
                 resolveProfile(manufacturerAvailable: manufacturerServiceAvailable, identity: identity)
 
                 await discoverCapabilities(using: client)
@@ -592,9 +612,59 @@ final class LiveModel {
         }
     }
 
+    /// Wraps a command so a request that never returns is detectable.
+    private func send(
+        _ command: String,
+        timeout: TimeInterval,
+        using elm: ELMClient
+    ) async -> ELMResponse? {
+        inFlightSince = Date()
+        defer { inFlightSince = nil }
+        return try? await elm.send(command, timeout: timeout)
+    }
+
+    /// A command outstanding for far longer than its own timeout means the link
+    /// is wedged — usually after the phone was suspended mid-request.
+    func checkForStall(now: Date = Date()) {
+        guard phase == .connected, let started = inFlightSince else { return }
+        guard now.timeIntervalSince(started) > 20 else { return }
+        recoverFromStall()
+    }
+
+    private func recoverFromStall() {
+        notice = "Connection stalled and was reset. Tap Connect to resume."
+        status = "Connection stalled"
+        if isRecording { stopRecording(reason: "stalled") }
+        stallWatchdog?.cancel()
+        stallWatchdog = nil
+        pollTask?.cancel()
+        pollTask = nil
+        transport.shutdown()
+        elm = nil
+        inFlightSince = nil
+        readings.clear()
+        dpf = nil
+        phase = .failed("Connection stalled")
+    }
+
+    /// Called when the app returns to the foreground: iOS may have suspended a
+    /// request mid-flight, leaving the loop waiting forever.
+    func appDidBecomeActive() {
+        checkForStall()
+    }
+
     // MARK: - Polling
 
     private func startPolling() {
+        stallWatchdog?.cancel()
+        stallWatchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self else { return }
+                await self.checkForStall()
+            }
+        }
+
         pollTask = Task { [weak self] in
             guard let self, let elm else { return }
 
@@ -664,7 +734,7 @@ final class LiveModel {
     private func sample(_ signal: VehicleProfile.StandardSignal, using elm: ELMClient) async {
         guard let pid = signal.pidValue else { return }
         let command = String(format: "01%02X", pid)
-        guard let reply = try? await elm.send(command, timeout: 2),
+        guard let reply = await send(command, timeout: 2, using: elm),
               let hex = reply.payloadHex,
               hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4))),
@@ -680,6 +750,16 @@ final class LiveModel {
             discoveryRetryDone = true
             await discoverCapabilities(using: elm)
             rebuildSignalList()
+        }
+
+        if !identityResolved, !identityRetried {
+            identityRetried = true
+            identity = await readIdentity(using: elm)
+            identityResolved = identity.calibrationID != nil || identity.vin != nil
+            if identityResolved {
+                resolveProfile(manufacturerAvailable: manufacturerServiceAvailable, identity: identity)
+                rebuildSignalList()
+            }
         }
 
         feedBatteryMonitor(pid: pid, value: value)

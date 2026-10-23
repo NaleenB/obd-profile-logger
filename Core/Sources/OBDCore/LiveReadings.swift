@@ -56,6 +56,12 @@ public struct LiveReadings: Equatable {
         lastUpdate = nil
     }
 
+    /// Drops decoded values only, keeping standard PIDs. Used when the decoding
+    /// profile changes mid-session and old values would be wrong.
+    public mutating func clearManufacturer() {
+        manufacturer.removeAll()
+    }
+
     public var isEmpty: Bool {
         values.isEmpty && manufacturer.isEmpty && lastUpdate == nil
     }

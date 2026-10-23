@@ -7,6 +7,7 @@ import OBDCore
 struct ContentView: View {
     @State private var model = LiveModel()
     @State private var showingSessions = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [GridItem(.adaptive(minimum: 132), spacing: 12)]
 
@@ -58,6 +59,9 @@ struct ContentView: View {
         #if os(macOS)
         .frame(minWidth: 380, minHeight: 540)
         #endif
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.appDidBecomeActive() }
+        }
         .sheet(isPresented: $showingSessions) {
             SessionsView(activeSessionID: model.activeSessionID) { deleted in
                 model.handleSessionsDeleted(deleted)
