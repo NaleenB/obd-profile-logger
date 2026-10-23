@@ -217,3 +217,60 @@ final class DTCSnapshotTests: XCTestCase {
         )
     }
 }
+
+final class SessionDeletionTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-delete-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    @discardableResult
+    private func make(_ id: String) throws -> URL {
+        let manifest = SessionManifest(sessionID: id, startedAt: WallClock.iso(), appVersion: "test")
+        let recorder = try SessionStore.createSession(root: root, manifest: manifest)
+        try recorder.recordSample(pid: 0x0C, name: "rpm", value: 1, unit: "rpm")
+        recorder.finish(reason: "user")
+        return recorder.directory
+    }
+
+    func testDeletesOneSessionAndLeavesTheRest() throws {
+        _ = try make("20260101-100000-aaaa")
+        let target = try make("20260101-110000-bbbb")
+
+        try SessionStore.deleteSession(at: target)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertEqual(SessionStore.summaries(root: root).map(\.id), ["20260101-100000-aaaa"])
+    }
+
+    func testDeletingSomethingAlreadyGoneIsNotAnError() throws {
+        let missing = root.appendingPathComponent("never-existed")
+        XCTAssertNoThrow(try SessionStore.deleteSession(at: missing))
+    }
+
+    func testDeleteAllExceptTheActiveSession() throws {
+        _ = try make("20260101-100000-aaaa")
+        _ = try make("20260101-110000-bbbb")
+        let active = try make("20260101-120000-cccc")
+
+        let removed = try SessionStore.deleteAllSessions(
+            root: root,
+            excluding: [active.lastPathComponent]
+        )
+
+        XCTAssertEqual(removed, 2)
+        XCTAssertEqual(SessionStore.summaries(root: root).map(\.id), ["20260101-120000-cccc"])
+    }
+
+    func testDeleteAllOnEmptyStoreIsHarmless() throws {
+        XCTAssertEqual(try SessionStore.deleteAllSessions(root: root), 0)
+    }
+}

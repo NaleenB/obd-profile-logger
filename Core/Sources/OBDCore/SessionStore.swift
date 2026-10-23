@@ -59,6 +59,31 @@ public enum SessionStore {
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
+    /// Removes one session directory. Idempotent: deleting something already
+    /// gone is not an error, so a stale list cannot produce a spurious failure.
+    public static func deleteSession(at directory: URL) throws {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try FileManager.default.removeItem(at: directory)
+    }
+
+    /// Removes every session except those named. Returns how many were removed.
+    /// `excluding` exists so the session currently being recorded is never
+    /// deleted out from under the recorder.
+    @discardableResult
+    public static func deleteAllSessions(
+        root: URL? = nil,
+        excluding excludedIDs: Set<String> = []
+    ) throws -> Int {
+        let base = try root ?? rootDirectory()
+        var removed = 0
+        for directory in sessions(root: base) {
+            if excludedIDs.contains(directory.lastPathComponent) { continue }
+            try deleteSession(at: directory)
+            removed += 1
+        }
+        return removed
+    }
+
     public static func readManifest(at directory: URL) -> SessionManifest? {
         let url = directory.appendingPathComponent(SessionRecorder.manifestFilename())
         guard let data = try? Data(contentsOf: url) else { return nil }

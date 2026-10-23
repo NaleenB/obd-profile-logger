@@ -57,7 +57,9 @@ struct ContentView: View {
         .padding(20)
         .frame(minWidth: 380, minHeight: 540)
         .sheet(isPresented: $showingSessions) {
-            SessionsView()
+            SessionsView(activeSessionID: model.activeSessionID) { deleted in
+                model.handleSessionsDeleted(deleted)
+            }
         }
         #if os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in

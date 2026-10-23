@@ -41,6 +41,9 @@ final class LiveModel {
     var recording: RecordingState = .idle
     var lastSessionURL: URL?
     var exportURL: URL?
+    /// Which session the prepared ZIP belongs to, so it can be discarded if that
+    /// session is deleted.
+    private(set) var exportedSessionID: String?
     var notice: String?
 
     private let transport = BLETransport()
@@ -78,6 +81,25 @@ final class LiveModel {
     }
 
     var isConnected: Bool { phase == .connected }
+
+    /// Session currently being written, if any. Used to protect it from deletion.
+    var activeSessionID: String? {
+        if case .recording(let id) = recording { return id }
+        return nil
+    }
+
+    /// Called after sessions are deleted so stale references and temporary ZIPs
+    /// are not kept around.
+    func handleSessionsDeleted(_ ids: Set<String>) {
+        if let directory = lastSessionURL, ids.contains(directory.lastPathComponent) {
+            lastSessionURL = nil
+        }
+        if let exportedSessionID, ids.contains(exportedSessionID) {
+            if let exportURL { SessionArchive.discard(exportURL) }
+            exportURL = nil
+            self.exportedSessionID = nil
+        }
+    }
     var isRecording: Bool { recording.isRecording }
 
     var manufacturerHighlights: [DecodedParameter] {
@@ -264,6 +286,7 @@ final class LiveModel {
             lastSessionURL = session.directory
             if let existing = exportURL { SessionArchive.discard(existing) }
             exportURL = nil
+            exportedSessionID = nil
             notice = nil
         } catch {
             recording = .failed("\(error)")
@@ -316,6 +339,7 @@ final class LiveModel {
         do {
             if let existing = exportURL { SessionArchive.discard(existing) }
             exportURL = try SessionArchive.export(directory)
+            exportedSessionID = directory.lastPathComponent
         } catch {
             notice = "\(error)"
         }

@@ -133,6 +133,15 @@ and body controllers do not answer generic OBD on this vehicle. When a module
 does not reply the scan is marked `complete=false` and the module is named in
 `incompleteModules`; the result is never presented as a full-vehicle scan.
 
+## Deleting
+
+Sessions can be deleted individually or all at once from the Sessions view, with
+confirmation. The session currently being recorded is never offered for deletion,
+and "delete all" skips it.
+
+Deleting removes the directory, not just the entry: the NDJSON and manifest are
+gone. Export is unaffected because it only ever reads the source.
+
 ## Export
 
 `SessionArchive.export` produces a ZIP at a unique temporary path using
