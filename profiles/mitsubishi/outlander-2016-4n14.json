@@ -1,0 +1,3855 @@
+{
+  "schemaVersion": 1,
+  "id": "mitsubishi-outlander-2016-4n14",
+  "manufacturer": "Mitsubishi",
+  "model": "Outlander",
+  "year": 2016,
+  "engine": "4N14 2.2 DiD",
+  "market": "AU",
+  "service": {
+    "readByLocalIdentifier": "21",
+    "readByIdentifier": null
+  },
+  "notes": [
+    "Service 0x22 is not implemented by this ECU; it replies NRC 0x11.",
+    "Byte offsets are absolute within the response frame, counting the 0x61 service byte and the local identifier. Established empirically.",
+    "Generated from decrypted MUT-III SE data plus an on-car capture."
+  ],
+  "blocks": [
+    {
+      "lid": "01",
+      "parameters": [
+        {
+          "itemNumber": 1,
+          "name": "Battery Voltage",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0732422,
+          "offset": 0.0,
+          "observed": {
+            "raw": 168,
+            "value": 12.3046896
+          }
+        },
+        {
+          "itemNumber": 4,
+          "name": "Vehicle speed",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 2,
+          "name": "Engine revolution",
+          "byte": 4,
+          "length": 1,
+          "factor": 25.0,
+          "offset": 0.0,
+          "unit": "rpm",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 3,
+          "name": "Target idle speed",
+          "byte": 5,
+          "length": 1,
+          "factor": 6.25,
+          "offset": 0.0,
+          "unit": "rpm",
+          "observed": {
+            "raw": 104,
+            "value": 650.0
+          }
+        },
+        {
+          "itemNumber": 510,
+          "name": "Target Idle Speed2",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "unit": "rpm",
+          "observed": {
+            "raw": 65,
+            "value": 650.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "02",
+      "parameters": [
+        {
+          "itemNumber": 43,
+          "name": "Air temperature sensor",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 73,
+            "value": 33.0
+          }
+        },
+        {
+          "itemNumber": 7,
+          "name": "ECT sensor",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 79,
+            "value": 39.0
+          }
+        },
+        {
+          "itemNumber": 6,
+          "name": "Boost pressure sensor",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.3332,
+          "offset": 0.0,
+          "unit": "kPa",
+          "observed": {
+            "raw": 76,
+            "value": 101.3232
+          }
+        },
+        {
+          "itemNumber": 8,
+          "name": "Intake air temperature sensor",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 79,
+            "value": 39.0
+          }
+        },
+        {
+          "itemNumber": 5,
+          "name": "Barometric pressure sensor",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.4933,
+          "offset": 0.292,
+          "unit": "kPa",
+          "observed": {
+            "raw": 204,
+            "value": 100.9252
+          }
+        }
+      ]
+    },
+    {
+      "lid": "03",
+      "parameters": [
+        {
+          "itemNumber": 144,
+          "name": "AT oil temperature sensor",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 70,
+            "value": 30.0
+          }
+        },
+        {
+          "itemNumber": 145,
+          "name": "Odometer calculated by ECU",
+          "byte": 3,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 80360,
+            "value": 80360.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "04",
+      "parameters": [
+        {
+          "itemNumber": 45,
+          "name": "TP sensor",
+          "byte": 2,
+          "length": 1,
+          "factor": 19.5313,
+          "offset": 0.0,
+          "unit": "mV",
+          "observed": {
+            "raw": 238,
+            "value": 4648.4494
+          }
+        },
+        {
+          "itemNumber": 9,
+          "name": "APP sensor(main)",
+          "byte": 4,
+          "length": 1,
+          "factor": 19.5313,
+          "offset": 0.0,
+          "unit": "mV",
+          "observed": {
+            "raw": 51,
+            "value": 996.0963
+          }
+        },
+        {
+          "itemNumber": 10,
+          "name": "APP sensor(sub)",
+          "byte": 5,
+          "length": 1,
+          "factor": 19.5313,
+          "offset": 0.0,
+          "unit": "mV",
+          "observed": {
+            "raw": 25,
+            "value": 488.2825
+          }
+        },
+        {
+          "itemNumber": 114,
+          "name": "Airflow sensor",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 52,
+            "value": 520.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "08",
+      "parameters": [
+        {
+          "itemNumber": 11,
+          "name": "APP sensor(main)",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 11,
+          "name": "APP sensor(main)",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 12,
+          "name": "APP sensor(sub)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 12,
+          "name": "APP sensor(sub)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 47,
+          "name": "TP sensor",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "observed": {
+            "raw": 235,
+            "value": 91.796875
+          }
+        },
+        {
+          "itemNumber": 46,
+          "name": "TPS learned closed position",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0390625,
+          "offset": -4.98,
+          "observed": {
+            "raw": 130,
+            "value": 0.09812499999999957
+          }
+        }
+      ]
+    },
+    {
+      "lid": "09",
+      "parameters": [
+        {
+          "itemNumber": 13,
+          "name": "APS(main) learned closed pos.",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.0762939,
+          "offset": -2500.0,
+          "unit": "mV",
+          "observed": {
+            "raw": 48575,
+            "value": 1205.9761924999998
+          }
+        }
+      ]
+    },
+    {
+      "lid": "10",
+      "parameters": [
+        {
+          "itemNumber": 117,
+          "name": "Exhaust temperature sensor",
+          "byte": 2,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 50,
+            "value": 50.0
+          }
+        },
+        {
+          "itemNumber": 118,
+          "name": "Catalyst temperature sensor",
+          "byte": 3,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 51,
+            "value": 55.0
+          }
+        },
+        {
+          "itemNumber": 119,
+          "name": "DPF temperature sensor",
+          "byte": 4,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 48,
+            "value": 40.0
+          }
+        },
+        {
+          "itemNumber": 120,
+          "name": "DPF difference pressure sensor",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.5,
+          "offset": -10.0,
+          "unit": "kPa",
+          "observed": {
+            "raw": 19,
+            "value": -0.5
+          }
+        },
+        {
+          "itemNumber": 511,
+          "name": "NTC Temperature Sensor",
+          "byte": 7,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 230,
+            "value": 950.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "11",
+      "parameters": [
+        {
+          "itemNumber": 153,
+          "name": "Soot loading by distance1",
+          "byte": 3,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 31,
+            "value": 310.0
+          }
+        },
+        {
+          "itemNumber": 155,
+          "name": "Soot loading by summation",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 52,
+            "value": 2.6
+          }
+        },
+        {
+          "itemNumber": 156,
+          "name": "Soot loading by Pressure Diff.",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 6,
+            "value": 0.30000000000000004
+          }
+        },
+        {
+          "itemNumber": 154,
+          "name": "Soot loading by distance2",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 29,
+            "value": 290.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "12",
+      "parameters": [
+        {
+          "itemNumber": 126,
+          "name": "Catalyst temperature sensor Max",
+          "byte": 2,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 177,
+            "value": 685.0
+          }
+        },
+        {
+          "itemNumber": 127,
+          "name": "DPF temperature sensor Max",
+          "byte": 3,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 230,
+            "value": 950.0
+          }
+        },
+        {
+          "itemNumber": 148,
+          "name": "Count of regeneration",
+          "byte": 4,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 123,
+            "value": 123.0
+          }
+        },
+        {
+          "itemNumber": 116,
+          "name": "Mode of regeneration request",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 512,
+          "name": "NTC Temperature Sensor Max",
+          "byte": 7,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 230,
+            "value": 950.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "13",
+      "parameters": [
+        {
+          "itemNumber": 128,
+          "name": "Odometer DPF temp. sensor Max",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 71729,
+            "value": 71729.0
+          }
+        },
+        {
+          "itemNumber": 151,
+          "name": "Status of soot load by diff pres",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 160,
+          "name": "Last regeneration mode",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "14",
+      "parameters": [
+        {
+          "itemNumber": 129,
+          "name": "Cruise switch",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 255,
+            "value": 5.1000000000000005
+          }
+        },
+        {
+          "itemNumber": 130,
+          "name": "Cruise cancel code",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "15",
+      "parameters": [
+        {
+          "itemNumber": 190,
+          "name": "Odometer for DPF by ECU",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 80360,
+            "value": 80360.0
+          }
+        },
+        {
+          "itemNumber": 191,
+          "name": "Nonuniform soot accumulation",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "g",
+          "observed": {
+            "raw": 1,
+            "value": 1.0
+          }
+        },
+        {
+          "itemNumber": 192,
+          "name": "Max value of DPF temperature",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 108,
+            "value": 680.0
+          }
+        },
+        {
+          "itemNumber": 513,
+          "name": "RE-Regeneration request flag",
+          "byte": 7,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "16",
+      "parameters": [
+        {
+          "itemNumber": 193,
+          "name": "Regeneration start distance1",
+          "byte": 2,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 80,
+            "value": 800.0
+          }
+        },
+        {
+          "itemNumber": 194,
+          "name": "Regeneration start summation",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 186,
+            "value": 9.3
+          }
+        },
+        {
+          "itemNumber": 195,
+          "name": "Regeneration start press. diff.",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 125,
+            "value": 6.25
+          }
+        },
+        {
+          "itemNumber": 196,
+          "name": "Regeneration start distance2",
+          "byte": 5,
+          "length": 1,
+          "factor": 10.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 75,
+            "value": 750.0
+          }
+        },
+        {
+          "itemNumber": 197,
+          "name": "DPF temperature",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 44,
+            "value": 40.0
+          }
+        },
+        {
+          "itemNumber": 514,
+          "name": "Count of RE-Regeneration request",
+          "byte": 7,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "17",
+      "parameters": [
+        {
+          "itemNumber": 198,
+          "name": "Engine oil level calculated",
+          "byte": 2,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -1000.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 100,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 199,
+          "name": "Engine oil consumption calculate",
+          "byte": 3,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -1000.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 100,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 200,
+          "name": "Fuel dilution calculated by ECU",
+          "byte": 4,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -1000.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 100,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 201,
+          "name": "Pre-Regene.Remain Soot Value",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 202,
+          "name": "Pre-Regene.Soot Value",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.05,
+          "offset": 0.0,
+          "unit": "g",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "18",
+      "parameters": [
+        {
+          "itemNumber": 515,
+          "name": "Engine Oil Level Calculated 2",
+          "byte": 2,
+          "length": 1,
+          "factor": 20.0,
+          "offset": 0.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 516,
+          "name": "ENG Oil Consumption Calculated 2",
+          "byte": 3,
+          "length": 1,
+          "factor": 2.0,
+          "offset": 0.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 517,
+          "name": "Fuel dilution calculated by ECU2",
+          "byte": 4,
+          "length": 1,
+          "factor": 2.0,
+          "offset": 0.0,
+          "unit": "cc",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 204,
+          "name": "Regeneration mode 2 times before",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 205,
+          "name": "Regeneration mode 3 times before",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "19",
+      "parameters": [
+        {
+          "itemNumber": 206,
+          "name": "Regeneration mode 4 times before",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 207,
+          "name": "Regeneration mode 5 times before",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 208,
+          "name": "Short interval regeneration rate",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 518,
+          "name": "Soot loading by summation 2",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 26,
+            "value": 2.6
+          }
+        },
+        {
+          "itemNumber": 519,
+          "name": "Soot loading by Pressure Diff. 2",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 3,
+            "value": 0.30000000000000004
+          }
+        }
+      ]
+    },
+    {
+      "lid": "1A",
+      "parameters": [
+        {
+          "itemNumber": 520,
+          "name": "Correction at S purge (POST)",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 521,
+          "name": "Amount of HC Storage(idle)",
+          "byte": 7,
+          "length": 1,
+          "factor": 200.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "1C",
+      "parameters": [
+        {
+          "itemNumber": 522,
+          "name": "S purge time (Last)",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 523,
+          "name": "S purge time (2 times before)",
+          "byte": 7,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "1E",
+      "parameters": [
+        {
+          "itemNumber": 488,
+          "name": "Brake Override Operated ODO",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 489,
+          "name": "Final torque target",
+          "byte": 5,
+          "length": 2,
+          "factor": 0.01,
+          "offset": -150.0,
+          "observed": {
+            "raw": 15000,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "1F",
+      "parameters": [
+        {
+          "itemNumber": 524,
+          "name": "Regeneration time Last",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 3,
+            "value": 3.0
+          }
+        },
+        {
+          "itemNumber": 525,
+          "name": "Regeneration time 2 times before",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 3,
+            "value": 3.0
+          }
+        },
+        {
+          "itemNumber": 526,
+          "name": "AVE. speed at Regene (Last)",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 74,
+            "value": 74.0
+          }
+        },
+        {
+          "itemNumber": 527,
+          "name": "AVE. speed at Regene (2nd last)",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 50,
+            "value": 50.0
+          }
+        },
+        {
+          "itemNumber": 528,
+          "name": "AVE. speed during Regene (Last)",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 25,
+            "value": 25.0
+          }
+        },
+        {
+          "itemNumber": 529,
+          "name": "AVE. speed during Regene (2nd)",
+          "byte": 7,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 38,
+            "value": 38.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "24",
+      "parameters": [
+        {
+          "itemNumber": 404,
+          "name": "BATT.current SNSR(learned value)",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0488,
+          "offset": -6.1976,
+          "observed": {
+            "raw": 109,
+            "value": -0.8784000000000001
+          }
+        },
+        {
+          "itemNumber": 409,
+          "name": "EPS Current",
+          "byte": 7,
+          "length": 1,
+          "factor": 0.5,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 432,
+          "name": "Starter Counter",
+          "byte": 11,
+          "length": 4,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "26",
+      "parameters": [
+        {
+          "itemNumber": 434,
+          "name": "Vehicle Consumption Current",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.244141,
+          "offset": -8000.0,
+          "observed": {
+            "raw": 32808,
+            "value": 9.77792799999952
+          }
+        },
+        {
+          "itemNumber": 563,
+          "name": "Odometer for injector cleaning",
+          "byte": 4,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km"
+        }
+      ]
+    },
+    {
+      "lid": "27",
+      "parameters": [
+        {
+          "itemNumber": 435,
+          "name": "Last Battery Deteriorated ODO",
+          "byte": 2,
+          "length": 2,
+          "factor": 4.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 18010,
+            "value": 72040.0
+          }
+        },
+        {
+          "itemNumber": 436,
+          "name": "2nd Last Batt. Deteriorated ODO",
+          "byte": 4,
+          "length": 2,
+          "factor": 4.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 18009,
+            "value": 72036.0
+          }
+        },
+        {
+          "itemNumber": 437,
+          "name": "3rd Last Batt. Deteriorated ODO",
+          "byte": 6,
+          "length": 2,
+          "factor": 4.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 18008,
+            "value": 72032.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "28",
+      "parameters": [
+        {
+          "itemNumber": 391,
+          "name": "Count of Regeneration Request",
+          "byte": 2,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 1,
+            "value": 1.0
+          }
+        },
+        {
+          "itemNumber": 530,
+          "name": "MAX Value of DPF Temp (2nd last)",
+          "byte": 4,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 104,
+            "value": 640.0
+          }
+        },
+        {
+          "itemNumber": 531,
+          "name": "MAX Value of DPF Temp (3rd last)",
+          "byte": 5,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 112,
+            "value": 720.0
+          }
+        },
+        {
+          "itemNumber": 532,
+          "name": "MAX Value of DPF Temp (4th last)",
+          "byte": 6,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 103,
+            "value": 630.0
+          }
+        },
+        {
+          "itemNumber": 533,
+          "name": "MAX Value of DPF Temp (5th last)",
+          "byte": 7,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 102,
+            "value": 620.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "29",
+      "parameters": [
+        {
+          "itemNumber": 397,
+          "name": "Atmospheric PRS. Abnormal Learn.",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.01,
+          "offset": 0.0,
+          "observed": {
+            "raw": 100,
+            "value": 1.0
+          }
+        },
+        {
+          "itemNumber": 398,
+          "name": "Count of HC Purge at Hot Idle",
+          "byte": 3,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 399,
+          "name": "Count of HC Purge at Cold Idle",
+          "byte": 5,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "2A",
+      "parameters": [
+        {
+          "itemNumber": 540,
+          "name": "Output Voltage of AFS",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 38,
+            "value": 0.76
+          }
+        },
+        {
+          "itemNumber": 541,
+          "name": "Amount of PM loading",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "g",
+          "observed": {
+            "raw": 1,
+            "value": 1.0
+          }
+        },
+        {
+          "itemNumber": 542,
+          "name": "Judg. of Stable for SOOT loading",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 543,
+          "name": "Average of DPF difference press.",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.5,
+          "offset": -10.0,
+          "unit": "kPa",
+          "observed": {
+            "raw": 20,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 544,
+          "name": "Exhaust Flow Volume",
+          "byte": 6,
+          "length": 1,
+          "factor": 100.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 545,
+          "name": "Judgement of DPF clogging",
+          "byte": 7,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 546,
+          "name": "Soot loading (Last DPF regene.)",
+          "byte": 8,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "g/L",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "42",
+      "parameters": [
+        {
+          "itemNumber": 53,
+          "name": "Small qt. Injection number",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 1.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 255,
+            "value": 256.0
+          }
+        },
+        {
+          "itemNumber": 534,
+          "name": "Count of Small qt. Learning",
+          "byte": 7,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 4,
+            "value": 4.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "43",
+      "parameters": [
+        {
+          "itemNumber": 490,
+          "name": "Fuel Injection Quantity Pilot1",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 491,
+          "name": "Fuel Injection Quantity Pilot2",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 492,
+          "name": "Fuel Injection Quantity Pilot3",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "44",
+      "parameters": [
+        {
+          "itemNumber": 15,
+          "name": "Vehicle speed",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.0078125,
+          "offset": 0.0,
+          "unit": "km/h",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 56,
+          "name": "Engine revolution",
+          "byte": 4,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "rpm",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "46",
+      "parameters": [
+        {
+          "itemNumber": 400,
+          "name": "ALT FR Duty(%)",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 26,
+            "value": 26.0
+          }
+        },
+        {
+          "itemNumber": 401,
+          "name": "ALT G Duty(%)",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 402,
+          "name": "Battery Temp Sensor",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 70,
+            "value": 30.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "47",
+      "parameters": [
+        {
+          "itemNumber": 17,
+          "name": "EGR valve target position",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 16,
+          "name": "EGR valve position",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "49",
+      "parameters": [
+        {
+          "itemNumber": 21,
+          "name": "Fuel temperature sensor",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -40.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 78,
+            "value": 38.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "4A",
+      "parameters": [
+        {
+          "itemNumber": 57,
+          "name": "Fuel quantity final",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.5,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 60,
+          "name": "Fuel quantity start",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.5,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 71,
+            "value": 35.5
+          }
+        },
+        {
+          "itemNumber": 59,
+          "name": "Fuel quantity smoke limit",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.5,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 90,
+            "value": 45.0
+          }
+        },
+        {
+          "itemNumber": 58,
+          "name": "Fuel quantity pre",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "4B",
+      "parameters": [
+        {
+          "itemNumber": 62,
+          "name": "Fuel injection timing main",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": -128.0,
+          "unit": "deg CA",
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 61,
+          "name": "Fuel injection interval pilot",
+          "byte": 3,
+          "length": 1,
+          "factor": 100.0,
+          "offset": 0.0,
+          "unit": "us",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "4C",
+      "parameters": [
+        {
+          "itemNumber": 64,
+          "name": "Fuel pressure target",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "MPa",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 63,
+          "name": "Fuel pressure",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "MPa",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 67,
+          "name": "High press. pump target value",
+          "byte": 4,
+          "length": 1,
+          "factor": 25.0,
+          "offset": 0.0,
+          "unit": "mA",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 66,
+          "name": "High press. pump learned value",
+          "byte": 5,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -1280.0,
+          "unit": "mA",
+          "observed": {
+            "raw": 138,
+            "value": 100.0
+          }
+        },
+        {
+          "itemNumber": 65,
+          "name": "High press. pump learned status",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 2,
+            "value": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "4E",
+      "parameters": [
+        {
+          "itemNumber": 30,
+          "name": "Control relay",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 33,
+          "name": "Engine check light",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 38,
+          "name": "Ignition switch",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 40,
+          "name": "Starter switch",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 42,
+          "name": "Neutral switch",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 131,
+          "name": "MT clutch switch",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 186,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 75,
+          "name": "P/S switch",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 134,
+          "name": "Normally closed brake switch",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 135,
+          "name": "Brake light switch",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 35,
+          "name": "Glow light",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 5,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 36,
+          "name": "Glow plug relay",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 5,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 410,
+          "name": "OCV (MIVEC)",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 5,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 411,
+          "name": "EGR Cooler Bypass Solenoid",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 5,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 25,
+          "name": "A/C SW1",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 27,
+          "name": "A/C relay",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 152,
+          "name": "Fuel filter stuffed switch",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 412,
+          "name": "Intank Pump Relay",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 136,
+          "name": "Cruise main switch",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 137,
+          "name": "Cruise cancel switch",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 138,
+          "name": "Cruise set switch",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 139,
+          "name": "Cruise resume switch",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 140,
+          "name": "Cruise control under operating",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 214,
+          "name": "DPF light",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 413,
+          "name": "Starter relay",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 215,
+          "name": "DPF light(yellow)",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "4F",
+      "parameters": [
+        {
+          "itemNumber": 142,
+          "name": "VGT sol. duty before revision",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 10,
+            "value": 10.0
+          }
+        },
+        {
+          "itemNumber": 143,
+          "name": "VGT sol. duty After revision",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 2,
+            "value": 2.0
+          }
+        },
+        {
+          "itemNumber": 217,
+          "name": "VGT F/B target boost",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.3332,
+          "offset": 0.0,
+          "unit": "kPa",
+          "observed": {
+            "raw": 73,
+            "value": 97.3236
+          }
+        }
+      ]
+    },
+    {
+      "lid": "51",
+      "parameters": [
+        {
+          "itemNumber": 219,
+          "name": "Fuel injection quantity main",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.5,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 220,
+          "name": "Fuel injection quantity after",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 221,
+          "name": "Fuel injection quantity post1",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 222,
+          "name": "Fuel injection quantity post2",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 223,
+          "name": "Fuel injection quantity post3",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.1,
+          "offset": 0.0,
+          "unit": "mm3/st",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "54",
+      "parameters": [
+        {
+          "itemNumber": 301,
+          "name": "NOx storage",
+          "byte": 3,
+          "length": 2,
+          "factor": 0.15259,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 302,
+          "name": "S storage",
+          "byte": 5,
+          "length": 2,
+          "factor": 0.0762951,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "55",
+      "parameters": [
+        {
+          "itemNumber": 303,
+          "name": "Compensation value of A/F sensor",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.01,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 304,
+          "name": "A/F SNSR. heater duty cycle",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 305,
+          "name": "A/F SNSR. current(after COMP.)",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "unit": "mA",
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 306,
+          "name": "A/F SNSR. current(before COMP.)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "unit": "mA",
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 307,
+          "name": "A/F heater mode",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "56",
+      "parameters": [
+        {
+          "itemNumber": 308,
+          "name": "Target A/F COMP. value1",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 309,
+          "name": "Target A/F COMP. value2",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 310,
+          "name": "Target A/F COMP. value3",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 311,
+          "name": "Target A/F COMP. value4",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 312,
+          "name": "Target A/F COMP. value5",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "57",
+      "parameters": [
+        {
+          "itemNumber": 313,
+          "name": "Target A/F COMP. value6",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 314,
+          "name": "Target A/F COMP. value7",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 315,
+          "name": "Target A/F COMP. value8",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.078125,
+          "offset": -10.0,
+          "observed": {
+            "raw": 128,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "58",
+      "parameters": [
+        {
+          "itemNumber": 318,
+          "name": "DPF regeneration remain time",
+          "byte": 2,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 319,
+          "name": "Count of S purge",
+          "byte": 4,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 320,
+          "name": "APS main(after COMP.)",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.390625,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "59",
+      "parameters": [
+        {
+          "itemNumber": 321,
+          "name": "DPF regeneration operating",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 322,
+          "name": "S purge operating",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 323,
+          "name": "NOx purge operating",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 325,
+          "name": "A/F sensor active",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 327,
+          "name": "S purge request",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 328,
+          "name": "DPF regeneration request",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 450,
+          "name": "Water Level SW",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 97,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 451,
+          "name": "Oil Pressure SW",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 97,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 452,
+          "name": "Battery current SNSR.calibration",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 97,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 454,
+          "name": "Battery degrade judgement flag",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 97,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 455,
+          "name": "Battery full-charge mode flag",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 97,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 458,
+          "name": "Amount of HC is over in D-HCT",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 459,
+          "name": "Active Warm Up Under Operating",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 460,
+          "name": "ASLF Main SW",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 564,
+          "name": "Engine system check display request",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5A",
+      "parameters": [
+        {
+          "itemNumber": 369,
+          "name": "A/F sensor value",
+          "byte": 2,
+          "length": 1,
+          "factor": 0.2,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 370,
+          "name": "Estimate A/F(cylinder)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.2,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 371,
+          "name": "Estimate A/F(final)",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.2,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 372,
+          "name": "A/F heater (on)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 373,
+          "name": "A/F heater (off)",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5B",
+      "parameters": [
+        {
+          "itemNumber": 374,
+          "name": "DPF TEMP SNSR 1 (Before UCC)",
+          "byte": 2,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 230,
+            "value": 950.0
+          }
+        },
+        {
+          "itemNumber": 375,
+          "name": "DPF TEMP SNSR 2 (ON UCC)",
+          "byte": 3,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 52,
+            "value": 60.0
+          }
+        },
+        {
+          "itemNumber": 376,
+          "name": "DPF TEMP SNSR 3 (After DPF)",
+          "byte": 4,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 50,
+            "value": 50.0
+          }
+        },
+        {
+          "itemNumber": 377,
+          "name": "Max value of DPF temperature",
+          "byte": 5,
+          "length": 1,
+          "factor": 10.0,
+          "offset": -400.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 176,
+            "value": 1360.0
+          }
+        },
+        {
+          "itemNumber": 378,
+          "name": "NOx purge interval",
+          "byte": 6,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5C",
+      "parameters": [
+        {
+          "itemNumber": 379,
+          "name": "A/F sensor impedance",
+          "byte": 2,
+          "length": 1,
+          "factor": 2.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 240,
+            "value": 480.0
+          }
+        },
+        {
+          "itemNumber": 380,
+          "name": "A/F sensor voltage",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 381,
+          "name": "A/F sensor voltage(+)",
+          "byte": 4,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 110,
+            "value": 2.2
+          }
+        },
+        {
+          "itemNumber": 382,
+          "name": "A/F sensor voltage(-)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.02,
+          "offset": 0.0,
+          "observed": {
+            "raw": 90,
+            "value": 1.8
+          }
+        },
+        {
+          "itemNumber": 383,
+          "name": "Minimum A/F under NOx purge",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.2,
+          "offset": 0.0,
+          "observed": {
+            "raw": 255,
+            "value": 51.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5D",
+      "parameters": [
+        {
+          "itemNumber": 384,
+          "name": "ODO. at DPF temperature MAX.",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 71729,
+            "value": 71729.0
+          }
+        },
+        {
+          "itemNumber": 385,
+          "name": "HC Purge Remain Time",
+          "byte": 5,
+          "length": 2,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5E",
+      "parameters": [
+        {
+          "itemNumber": 535,
+          "name": "Odometer NTC temp. Sensor Max",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 80360,
+            "value": 80360.0
+          }
+        },
+        {
+          "itemNumber": 536,
+          "name": "Exhaust temp. sens.MAX(S purge)",
+          "byte": 5,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 40,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 537,
+          "name": "Catalyst temp. sens.MAX(S purge)",
+          "byte": 6,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 40,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 538,
+          "name": "DPF temp. sens.MAX(S purge)",
+          "byte": 7,
+          "length": 1,
+          "factor": 5.0,
+          "offset": -200.0,
+          "unit": "degC",
+          "observed": {
+            "raw": 40,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "5F",
+      "parameters": [
+        {
+          "itemNumber": 390,
+          "name": "Fuel Consumption(in all time)",
+          "byte": 2,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 6442,
+            "value": 6442.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A0",
+      "parameters": [
+        {
+          "itemNumber": 225,
+          "name": "Diff. press. learning zero (M0)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 227,
+          "name": "Diff. press. learning zero (M1)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A1",
+      "parameters": [
+        {
+          "itemNumber": 230,
+          "name": "Diff. press. learning zero (M2)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 232,
+          "name": "Diff. press. learning zero (M3)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A2",
+      "parameters": [
+        {
+          "itemNumber": 235,
+          "name": "Diff. press. learning zero (M4)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 237,
+          "name": "Diff. press. learning zero (M5)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A3",
+      "parameters": [
+        {
+          "itemNumber": 240,
+          "name": "Diff. press. learning zero (M6)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 242,
+          "name": "Diff. press. learning zero (M7)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A4",
+      "parameters": [
+        {
+          "itemNumber": 245,
+          "name": "Diff. press. learning zero (M8)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 247,
+          "name": "Diff. press. learning zero (M9)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A5",
+      "parameters": [
+        {
+          "itemNumber": 250,
+          "name": "Diff. press. learning zero (M10)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 252,
+          "name": "Diff. press. learning zero (M11)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A6",
+      "parameters": [
+        {
+          "itemNumber": 255,
+          "name": "Diff. press. learning zero (M12)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 257,
+          "name": "Diff. press. learning zero (M13)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A7",
+      "parameters": [
+        {
+          "itemNumber": 260,
+          "name": "Diff. press. learning zero (M14)",
+          "byte": 3,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        },
+        {
+          "itemNumber": 262,
+          "name": "Diff. press. learning zero (M15)",
+          "byte": 5,
+          "length": 1,
+          "factor": 0.04,
+          "offset": -5.12,
+          "unit": "kPa",
+          "observed": {
+            "raw": 121,
+            "value": -0.28000000000000025
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A8",
+      "parameters": [
+        {
+          "itemNumber": 500,
+          "name": "GLOW Real Duty(%)",
+          "byte": 2,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 501,
+          "name": "Radiator Fan Duty(%)",
+          "byte": 3,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "%",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "A9",
+      "parameters": [
+        {
+          "itemNumber": 270,
+          "name": "Target A/F COMP. value1 (detail)",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 271,
+          "name": "Target A/F COMP. value2 (detail)",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "AA",
+      "parameters": [
+        {
+          "itemNumber": 272,
+          "name": "Target A/F COMP. value3 (detail)",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 273,
+          "name": "Target A/F COMP. value4 (detail)",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "AB",
+      "parameters": [
+        {
+          "itemNumber": 274,
+          "name": "Target A/F COMP. value5 (detail)",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 275,
+          "name": "Target A/F COMP. value6 (detail)",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "AC",
+      "parameters": [
+        {
+          "itemNumber": 276,
+          "name": "Target A/F COMP. value7 (detail)",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 277,
+          "name": "Target A/F COMP. value8 (detail)",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -32.767,
+          "observed": {
+            "raw": 32767,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B0",
+      "parameters": [
+        {
+          "itemNumber": 78,
+          "name": "Small qt. pressure 1 #1",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 488,
+            "value": -0.01200000000000001
+          }
+        },
+        {
+          "itemNumber": 79,
+          "name": "Small qt. pressure 1 #2",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 481,
+            "value": -0.019000000000000017
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B1",
+      "parameters": [
+        {
+          "itemNumber": 80,
+          "name": "Small qt. pressure 1 #3",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 489,
+            "value": -0.01100000000000001
+          }
+        },
+        {
+          "itemNumber": 81,
+          "name": "Small qt. pressure 1 #4",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 493,
+            "value": -0.007000000000000006
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B2",
+      "parameters": [
+        {
+          "itemNumber": 82,
+          "name": "Small qt. pressure 2 #1",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 477,
+            "value": -0.022999999999999965
+          }
+        },
+        {
+          "itemNumber": 83,
+          "name": "Small qt. pressure 2 #2",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 486,
+            "value": -0.014000000000000012
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B3",
+      "parameters": [
+        {
+          "itemNumber": 84,
+          "name": "Small qt. pressure 2 #3",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 493,
+            "value": -0.007000000000000006
+          }
+        },
+        {
+          "itemNumber": 85,
+          "name": "Small qt. pressure 2 #4",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 488,
+            "value": -0.01200000000000001
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B4",
+      "parameters": [
+        {
+          "itemNumber": 86,
+          "name": "Small qt. pressure 3 #1",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 482,
+            "value": -0.018000000000000016
+          }
+        },
+        {
+          "itemNumber": 87,
+          "name": "Small qt. pressure 3 #2",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 475,
+            "value": -0.024999999999999967
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B5",
+      "parameters": [
+        {
+          "itemNumber": 88,
+          "name": "Small qt. pressure 3 #3",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 487,
+            "value": -0.013000000000000012
+          }
+        },
+        {
+          "itemNumber": 89,
+          "name": "Small qt. pressure 3 #4",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 480,
+            "value": -0.020000000000000018
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B6",
+      "parameters": [
+        {
+          "itemNumber": 90,
+          "name": "Small qt. pressure 4 #1",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 509,
+            "value": 0.009000000000000008
+          }
+        },
+        {
+          "itemNumber": 91,
+          "name": "Small qt. pressure 4 #2",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 499,
+            "value": -0.0010000000000000009
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B7",
+      "parameters": [
+        {
+          "itemNumber": 92,
+          "name": "Small qt. pressure 4 #3",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 496,
+            "value": -0.0040000000000000036
+          }
+        },
+        {
+          "itemNumber": 93,
+          "name": "Small qt. pressure 4 #4",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 508,
+            "value": 0.008000000000000007
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B8",
+      "parameters": [
+        {
+          "itemNumber": 94,
+          "name": "Small qt. pressure 5 #1",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 507,
+            "value": 0.007000000000000006
+          }
+        },
+        {
+          "itemNumber": 95,
+          "name": "Small qt. pressure 5 #2",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 502,
+            "value": 0.0020000000000000018
+          }
+        }
+      ]
+    },
+    {
+      "lid": "B9",
+      "parameters": [
+        {
+          "itemNumber": 96,
+          "name": "Small qt. pressure 5 #3",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 503,
+            "value": 0.0030000000000000027
+          }
+        },
+        {
+          "itemNumber": 97,
+          "name": "Small qt. pressure 5 #4",
+          "byte": 4,
+          "length": 2,
+          "factor": 0.001,
+          "offset": -0.5,
+          "unit": "ms",
+          "observed": {
+            "raw": 515,
+            "value": 0.015000000000000013
+          }
+        }
+      ]
+    },
+    {
+      "lid": "BE",
+      "parameters": [
+        {
+          "itemNumber": 106,
+          "name": "ISC torque",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.1,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 107,
+          "name": "Small qt. map counter",
+          "byte": 4,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 108,
+          "name": "Small qt. pressure counter",
+          "byte": 5,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 108,
+          "name": "Small qt. pressure Not Complete",
+          "byte": 6,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "C0",
+      "parameters": [
+        {
+          "itemNumber": 547,
+          "name": "Odometer from Last SQL",
+          "byte": 2,
+          "length": 2,
+          "factor": 0.305176,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 11309,
+            "value": 3451.235384
+          }
+        },
+        {
+          "itemNumber": 548,
+          "name": "ODO from Last SQL or change INJ",
+          "byte": 4,
+          "length": 3,
+          "factor": 1.0,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 80354,
+            "value": 80354.0
+          }
+        },
+        {
+          "itemNumber": 549,
+          "name": "ODO from last 2nd to last SQL",
+          "byte": 7,
+          "length": 2,
+          "factor": 0.305176,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 40263,
+            "value": 12287.301288
+          }
+        },
+        {
+          "itemNumber": 550,
+          "name": "ODO (3rd - 2nd last SQL)",
+          "byte": 9,
+          "length": 2,
+          "factor": 0.305176,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 41757,
+            "value": 12743.234232
+          }
+        },
+        {
+          "itemNumber": 551,
+          "name": "ODO (4th - 3rd last SQL)",
+          "byte": 11,
+          "length": 2,
+          "factor": 0.305176,
+          "offset": 0.0,
+          "unit": "km",
+          "observed": {
+            "raw": 0,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 552,
+          "name": "Count of SQL (auto)",
+          "byte": 13,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 7,
+            "value": 7.0
+          }
+        },
+        {
+          "itemNumber": 553,
+          "name": "Count of SQL (manual)",
+          "byte": 14,
+          "length": 1,
+          "factor": 1.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 1,
+            "value": 1.0
+          }
+        },
+        {
+          "itemNumber": 554,
+          "name": "Condition of SQL",
+          "byte": 15,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 32,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 555,
+          "name": "Water temp. condition of SQL",
+          "byte": 15,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 32,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 556,
+          "name": "Fuel temp. condition of SQL",
+          "byte": 15,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 32,
+            "value": 0.0
+          }
+        },
+        {
+          "itemNumber": 557,
+          "name": "AT Oil temp. condition of SQL",
+          "byte": 15,
+          "length": 1,
+          "factor": 0.0,
+          "offset": 0.0,
+          "observed": {
+            "raw": 32,
+            "value": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "lid": "E1",
+      "parameters": [
+        {
+          "itemNumber": 5,
+          "name": "ECU serial number",
+          "byte": 2,
+          "length": -1,
+          "factor": 1.0,
+          "offset": 0.0
+        }
+      ]
+    }
+  ]
+}
