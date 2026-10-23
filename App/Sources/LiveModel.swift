@@ -70,14 +70,50 @@ final class LiveModel {
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
     private let dtcScanInterval: TimeInterval = 10
-    private let profileID = "mitsubishi-outlander-2016-4n14"
+    /// Identifier of the profile in use. Persisted so the choice survives relaunch.
+    private(set) var profileID: String =
+        UserDefaults.standard.string(forKey: "profileID") ?? ProfileCatalog.defaultID
+
+    /// Profiles bundled with the app, for the picker.
+    let availableProfiles = ProfileCatalog.entries()
 
     init() {
+        loadProfile()
+    }
+
+    private func loadProfile() {
         do {
-            profile = try VehicleProfileLoader.load(named: "outlander-2016-4n14")
+            profile = try ProfileCatalog.load(id: resourceName(for: profileID))
         } catch {
+            profile = nil
             notice = "Vehicle profile unavailable: \(error)"
         }
+    }
+
+    /// Profile ids are dotted and human-readable; bundle resources are the short
+    /// file names.
+    private func resourceName(for id: String) -> String {
+        switch id {
+        case "mitsubishi-outlander-2016-4n14": return "outlander-2016-4n14"
+        case "generic-iso15765-can": return "iso15765-can"
+        default: return id
+        }
+    }
+
+    /// Switching profiles takes effect on the next connection: the protocol,
+    /// signal list and module headers are all fixed at connect time.
+    func selectProfile(_ id: String) {
+        guard id != profileID else { return }
+        profileID = id
+        UserDefaults.standard.set(id, forKey: "profileID")
+        loadProfile()
+        if isConnected {
+            notice = "Reconnect to apply the \(profile?.model ?? "new") profile."
+        }
+    }
+
+    var profileTitle: String {
+        availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
     }
 
     var isConnected: Bool { phase == .connected }

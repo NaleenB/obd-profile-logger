@@ -43,8 +43,9 @@ five rail pressures, oil dilution, and rail pressure versus target.
 
 | Vehicle | Standard OBD | Manufacturer data | Verified |
 |---|---|---|---|
-| Mitsubishi Outlander 2016, 2.2 DiD (4N14) | yes | yes — 276 parameters | on car |
-| Anything else | yes | no profile yet | — |
+| Mitsubishi Outlander 2016, 2.2 DiD (4N14) | yes | yes — 274 parameters | on car |
+| Generic ISO 15765-4 (CAN) — template | yes | none | not yet |
+| Anything else | yes | needs a profile | — |
 
 Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/README.md).
 
@@ -106,6 +107,7 @@ Research/   how the manufacturer data was obtained
 - [`docs/protocol-notes.md`](docs/protocol-notes.md) — ELM327 and Mitsubishi quirks, written for any language
 - [`docs/session-format.md`](docs/session-format.md) — the on-disk contract
 - [`docs/first-drive-checklist.md`](docs/first-drive-checklist.md) — hardware verification
+- [`docs/install-ios.md`](docs/install-ios.md) — installing on an iPhone with free provisioning
 - [`profiles/README.md`](profiles/README.md) — adding a vehicle
 
 ## Status

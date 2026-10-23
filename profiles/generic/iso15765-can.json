@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "generic-iso15765-can",
+  "manufacturer": "Generic",
+  "model": "Any ISO 15765-4 (CAN) vehicle",
+  "year": 2008,
+  "engine": "unspecified",
+  "market": null,
+  "notes": [
+    "Template profile. No manufacturer data: service 0x21 blocks are empty and will be skipped.",
+    "Capability discovery filters this list to whatever the car actually advertises, so listing a PID a given vehicle lacks is harmless.",
+    "If your car does not speak CAN 11/500, change elmProtocol to \"0\" for auto-detect, or copy this file and adjust the module headers.",
+    "To add manufacturer data, see profiles/README.md and the Mitsubishi profile as a worked example."
+  ],
+  "service": {
+    "readByLocalIdentifier": null,
+    "readByIdentifier": null
+  },
+  "transport": {
+    "elmProtocol": "6",
+    "description": "ISO 15765-4 (CAN 11/500)",
+    "modules": [
+      {
+        "name": "ECM",
+        "requestHeader": "7E0",
+        "responseHeader": "7E8"
+      }
+    ]
+  },
+  "standard": [
+    { "pid": "0C", "name": "Engine speed", "unit": "rpm", "bytes": 2, "factor": 0.25, "offset": 0, "decimals": 0 },
+    { "pid": "0D", "name": "Vehicle speed", "unit": "km/h", "bytes": 1, "factor": 1, "offset": 0, "decimals": 0 },
+    { "pid": "05", "name": "Coolant temperature", "unit": "degC", "bytes": 1, "factor": 1, "offset": -40, "decimals": 0 },
+    { "pid": "04", "name": "Calculated load", "unit": "%", "bytes": 1, "factor": 0.392157, "offset": 0, "decimals": 0 },
+    { "pid": "0B", "name": "Intake MAP", "unit": "kPa", "bytes": 1, "factor": 1, "offset": 0, "decimals": 0 },
+    { "pid": "0F", "name": "Intake air temperature", "unit": "degC", "bytes": 1, "factor": 1, "offset": -40, "decimals": 0 },
+    { "pid": "10", "name": "Mass air flow", "unit": "g/s", "bytes": 2, "factor": 0.01, "offset": 0, "decimals": 2 },
+    { "pid": "11", "name": "Throttle position", "unit": "%", "bytes": 1, "factor": 0.392157, "offset": 0, "decimals": 0 },
+    { "pid": "2F", "name": "Fuel level", "unit": "%", "bytes": 1, "factor": 0.392157, "offset": 0, "decimals": 0 },
+    { "pid": "33", "name": "Barometric pressure", "unit": "kPa", "bytes": 1, "factor": 1, "offset": 0, "decimals": 0 },
+    { "pid": "42", "name": "Control module voltage", "unit": "V", "bytes": 2, "factor": 0.001, "offset": 0, "decimals": 2 },
+    { "pid": "5C", "name": "Engine oil temperature", "unit": "degC", "bytes": 1, "factor": 1, "offset": -40, "decimals": 0 }
+  ],
+  "blocks": []
+}

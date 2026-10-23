@@ -175,3 +175,47 @@ final class StandardSignalTests: XCTestCase {
         XCTAssertNil(profile.elmProtocol, "absent protocol must leave the adapter on auto-detect")
     }
 }
+
+final class GenericProfileTests: XCTestCase {
+
+    private func profile(_ relative: String) throws -> VehicleProfile {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(relative)
+        return try VehicleProfileLoader.load(from: url)
+    }
+
+    func testGenericProfileIsValid() throws {
+        let generic = try profile("profiles/generic/iso15765-can.json")
+        XCTAssertEqual(generic.manufacturer, "Generic")
+        XCTAssertTrue(generic.blocks.isEmpty, "a generic profile has no manufacturer data")
+        XCTAssertNil(generic.service.readByLocalIdentifier)
+        XCTAssertGreaterThanOrEqual(generic.signals.count, 10)
+    }
+
+    func testGenericProfileDecodesLikeAnyOther() throws {
+        let generic = try profile("profiles/generic/iso15765-can.json")
+        let rpm = try XCTUnwrap(generic.signals.first { $0.pid == "0C" })
+        XCTAssertEqual(rpm.decode([0x0A, 0x28]) ?? 0, 650, accuracy: 0.001)
+
+        let coolant = try XCTUnwrap(generic.signals.first { $0.pid == "05" })
+        XCTAssertEqual(coolant.decode([0x55]) ?? 0, 45, accuracy: 0.001)
+    }
+
+    func testGenericProfileNamesAModuleForDTCScanning() throws {
+        let generic = try profile("profiles/generic/iso15765-can.json")
+        XCTAssertEqual(generic.diagnosticModules.first?.requestHeader, "7E0")
+    }
+
+    /// Both shipped profiles must satisfy the same schema, or the catalogue will
+    /// silently drop one at runtime.
+    func testBothProfilesParse() throws {
+        for path in ["profiles/mitsubishi/outlander-2016-4n14.json",
+                     "profiles/generic/iso15765-can.json"] {
+            let loaded = try profile(path)
+            XCTAssertFalse(loaded.id.isEmpty)
+            XCTAssertFalse(loaded.signals.isEmpty, "\(path) has no signals")
+        }
+    }
+}

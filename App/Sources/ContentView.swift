@@ -70,10 +70,11 @@ struct ContentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text("OBDLogger")
                     .font(.largeTitle.weight(.semibold))
                 Spacer()
+                profileMenu
                 recordingBadge
             }
             Text(model.status)
@@ -86,6 +87,27 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var profileMenu: some View {
+        Menu {
+            ForEach(model.availableProfiles) { entry in
+                Button {
+                    model.selectProfile(entry.id)
+                } label: {
+                    if entry.id == model.profileID {
+                        Label(entry.title, systemImage: "checkmark")
+                    } else {
+                        Text(entry.title)
+                    }
+                }
+            }
+        } label: {
+            Label(model.profileTitle, systemImage: "car")
+                .font(.caption)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private var statusColor: Color {

@@ -66,10 +66,10 @@ Planned, in rough order. Nothing here is committed to a date.
 |---|---|
 | Session history | list past sessions in the app and re-export any of them |
 | Profile-driven standard PIDs | extend the profile schema with a `standard` block so even mode `01` tiles come from JSON |
-| Profile picker | ship more than one vehicle profile and let the user choose |
+| ~~Profile picker~~ | done — two profiles ship, chosen from the header |
 | Baseline learning | compare a drive against the car's own normal, not just factory limits |
 | Background recording | keep a session running with the phone locked |
-| More vehicle profiles | the whole point — see `profiles/README.md` |
+| More vehicle profiles | the whole point — `profiles/generic/iso15765-can.json` is the template |
 | CI | `swift test` plus app builds on a macOS runner |
 
 ## Not in scope
