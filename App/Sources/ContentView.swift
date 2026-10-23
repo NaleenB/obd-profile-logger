@@ -80,7 +80,13 @@ struct ContentView: View {
                 Text("OBDLogger")
                     .font(.largeTitle.weight(.semibold))
                 Spacer()
-                profileMenu
+                if model.needsProfileAttention {
+                    profileMenu
+                } else if model.isConnected {
+                    Text(model.profileTitle)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 recordingBadge
             }
             Text(model.status)

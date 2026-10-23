@@ -283,6 +283,12 @@ final class LiveModel {
         }
     }
 
+    /// The picker only appears when the app is not sure which profile applies.
+    /// A confident match — calibration, VIN or live agreement — needs no choice.
+    var needsProfileAttention: Bool {
+        profileMatchMethod == "generic" || profileMatchMethod == "assumed"
+    }
+
     var profileTitle: String {
         if profileSelection == "auto" {
             let resolved = availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
