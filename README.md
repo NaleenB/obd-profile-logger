@@ -5,6 +5,8 @@ Any car works for standard PIDs and fault codes. A vehicle profile adds the data
 manufacturer keeps behind a proprietary service — starting with DPF soot and regeneration
 state on a 2016 Mitsubishi Outlander diesel.
 
+<img src="docs/images/icon.png" width="112" alt="OBDLogger icon">
+
 [![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015-lightgrey)]()
 [![Swift](https://img.shields.io/badge/swift-5.9%2B-orange)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -49,6 +51,12 @@ five rail pressures, oil dilution, and rail pressure versus target.
 
 Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/README.md).
 
+The app picks the profile itself: it asks whether the car answers a manufacturer
+service, reads the calibration ID and VIN, and only applies a manufacturer profile
+when they match. Answering `0x21` is not treated as proof that the offsets apply —
+several models speak it with completely different block layouts, and a wrong match
+would produce confident nonsense. You can override the choice by hand.
+
 ## Quick start
 
 Requires Xcode 15+ and an ELM327 adapter (BLE for iPhone; BLE or USB for Mac).
@@ -70,6 +78,7 @@ service at all: `./run.sh --sweep-only --service 21`.
 ## What it does
 
 - **Live data** over BLE, with a profile-driven manufacturer panel
+- **Automatic profile selection** from calibration ID or VIN, with a manual override
 - **Automatic recording** on connect, to append-only NDJSON: one line per successful
   observation, each with its own monotonic timestamp, plus a manifest and events
 - **DTC scanning** with per-module attribution, distinguishing "no codes" from
