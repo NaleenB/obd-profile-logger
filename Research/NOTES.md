@@ -84,3 +84,41 @@ responses. Confirm the offsets by checking the decoded soot lands in 0–12.75 g
 and the regen count is a plausible integer.
 
 Nothing here writes to the ECU: service `0x21` is read-only.
+
+## VERIFIED on the vehicle — 2026-10-23 12:44
+
+`--sweep-only --service 21` with ignition on, engine off, battery 11.8 V.
+
+**256 identifiers tried: 104 answered, 0 silent, 152 rejected with NRC 0x12**
+(sub-function not supported). Service `0x21` is confirmed working.
+
+### Offset convention established
+
+Byte offsets are **absolute within the response frame**, counting the `0x61`
+service byte and the local identifier. Proven two ways:
+
+| Item | Absolute | Data-relative | Truth |
+|---|---|---|---|
+| 1 Battery voltage | 12.3 V | 0.0 V | engine off, battery ~12.3 V |
+| 2 Engine revolution | 0 rpm | 1625 rpm | engine was off |
+
+Absolute indexing is correct on both. Data-relative fails both.
+
+### DPF values read from the car
+
+| LID | Offset | Signal | Value |
+|---|---|---|---|
+| `0x11` | 4 | Soot by accumulation | **2.6 g/L** (20 % of 12.75 max) |
+| `0x11` | 5 | Soot by pressure difference | **0.3 g/L** |
+| `0x12` | 4 (2 bytes) | Regeneration count | **123** |
+| `0x12` | 6 | Regeneration requested | **no** |
+
+Sanity: 123 regenerations over ~80,000 km is one per ~650 km, which is typical
+for a healthy DPF on this class of vehicle. The two soot estimates disagreeing
+(2.6 vs 0.3 g/L) is expected — they are independent models, which is exactly why
+the ECU keeps both.
+
+Raw frames: `6111141F34061D` and `6112B1E6007B00E60000000000`.
+
+The decoder is implemented in `Core/Sources/OBDCore/MUT21.swift` with 8 tests
+built from these captured frames.
