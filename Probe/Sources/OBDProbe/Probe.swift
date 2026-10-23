@@ -39,7 +39,8 @@ final class Probe {
         scanModules: Bool = true,
         liveSampleSeconds: TimeInterval = 20,
         mode22Seconds: TimeInterval = 150,
-        sweepOnly: Bool = false
+        sweepOnly: Bool = false,
+        sweepService: UInt8 = 0x22
     ) async throws {
         connectedPortLabel = portLabel
         adapter["bleName"] = bleName.isEmpty ? "(unnamed)" : bleName
@@ -53,7 +54,7 @@ final class Probe {
                 _ = try await waitForECU(maxWait: ignitionWait)
             }
             try await pinProtocol()
-            try await sweepMode22(budget: mode22Seconds)
+            try await sweepIdentifiers(service: sweepService, budget: mode22Seconds)
             try await readDTCs()
             try writeOutputs()
             return
@@ -84,7 +85,7 @@ final class Probe {
         if scanModules {
             try await identifyModules()
         }
-        try await sweepMode22(budget: mode22Seconds)
+        try await sweepIdentifiers(service: sweepService, budget: mode22Seconds)
 
         try writeOutputs()
     }
@@ -335,11 +336,11 @@ final class Probe {
 
     /// Read-only sweep of the UDS identifier space on the engine ECU.
     ///
-    /// Nothing here writes to the ECU: service 0x22 is ReadDataByIdentifier.
-    /// Negative replies (7F 22 xx) are recorded too — they map what is absent,
-    /// which is as useful as what is present.
-    private func sweepMode22(budget: TimeInterval) async throws {
-        rule("Mode 22 identifier sweep (read-only)")
+    /// Nothing here writes to the ECU: 0x22 is ReadDataByIdentifier, 0x21 is
+    /// ReadDataByLocalIdentifier, 0x1A is ReadECUIdentification. All read-only.
+    private func sweepIdentifiers(service: UInt8, budget: TimeInterval) async throws {
+        let serviceName = String(format: "%02X", service)
+        rule("Service \(serviceName) identifier sweep (read-only)")
 
         guard budget > 0 else {
             say("  Skipped.")
@@ -350,46 +351,57 @@ final class Probe {
         _ = try? await elm.send("ATSP6", timeout: 3)
         _ = try? await elm.send("ATSH7E0", timeout: 3)
 
-        let ranges: [(UInt16, UInt16)] = [
-            (0xF100, 0xF1FF),   // UDS identification block
-            (0x0100, 0x01FF),
-            (0x0200, 0x02FF),
-            (0x1000, 0x10FF),
-            (0x2000, 0x20FF),
-            (0x3000, 0x30FF)
-        ]
-
         var positive: [String: String] = [:]
-        var rejected = 0
+        var nrcCounts: [String: Int] = [:]
         var silent = 0
         var tried = 0
+        let expectedReply = String(format: "%02X", service &+ 0x40)
         let start = Date()
 
-        sweep: for (low, high) in ranges {
-            for did in low...high {
-                if Date().timeIntervalSince(start) > budget { break sweep }
-
-                let command = String(format: "22%04X", did)
-                tried += 1
-
-                guard let reply = try? await elm.send(command, timeout: 1.2),
-                      let hex = reply.payloadHex
-                else {
-                    silent += 1
-                    continue
+        let identifiers: [(UInt16, String)] = {
+            switch service {
+            case 0x22:
+                var list: [(UInt16, String)] = []
+                for (low, high) in [(UInt16(0xF100), UInt16(0xF1FF)),
+                                    (0x0100, 0x01FF),
+                                    (0x0200, 0x02FF),
+                                    (0x1000, 0x10FF),
+                                    (0x2000, 0x20FF),
+                                    (0x3000, 0x30FF)] {
+                    for did in low...high { list.append((did, String(format: "%04X", did))) }
                 }
+                return list
+            default:
+                // 0x21 and 0x1A take a single-byte local identifier.
+                return (0...0xFF).map { (UInt16($0), String(format: "%02X", $0)) }
+            }
+        }()
 
-                if hex.hasPrefix("62") {
-                    positive[String(format: "%04X", did)] = hex
-                } else if hex.hasPrefix("7F") {
-                    rejected += 1
-                } else {
-                    silent += 1
-                }
+        sweep: for (_, identifier) in identifiers {
+            if Date().timeIntervalSince(start) > budget { break sweep }
 
-                if tried % 64 == 0 {
-                    sayInline("    … \(tried) tried, \(positive.count) answered\r")
-                }
+            let command = serviceName + identifier
+            tried += 1
+
+            guard let reply = try? await elm.send(command, timeout: 1.2),
+                  let hex = reply.payloadHex
+            else {
+                silent += 1
+                continue
+            }
+
+            if hex.hasPrefix(expectedReply) {
+                positive[identifier] = hex
+            } else if hex.hasPrefix("7F") {
+                // 7F <service> <NRC> — classify the negative response code.
+                let nrc = String(hex.dropFirst(4).prefix(2))
+                nrcCounts[nrc, default: 0] += 1
+            } else {
+                silent += 1
+            }
+
+            if tried % 64 == 0 {
+                sayInline("    … \(tried) tried, \(positive.count) answered\r")
             }
         }
 
@@ -398,7 +410,10 @@ final class Probe {
         _ = try? await elm.send("ATH0", timeout: 3)
 
         say("  \(tried) identifiers tried in \(Int(Date().timeIntervalSince(start)))s")
-        say("  \(positive.count) answered, \(rejected) rejected, \(silent) silent")
+        say("  \(positive.count) answered, \(silent) silent")
+        for (nrc, count) in nrcCounts.sorted(by: { $0.key < $1.key }) {
+            say("  \(count) rejected: NRC \(nrc) — \(Probe.nrcMeaning(nrc))")
+        }
 
         for key in positive.keys.sorted() {
             let value = positive[key] ?? ""
@@ -406,16 +421,34 @@ final class Probe {
         }
 
         if positive.isEmpty {
-            notes.append("Mode 22 sweep found no manufacturer identifiers; the ECU may not expose them on 7E0.")
+            notes.append("Service \(serviceName) sweep found no identifiers on 7E0.")
         }
 
-        vehicle["mode22"] = [
+        var summary: [String: Any] = [
+            "service": serviceName,
             "tried": tried,
             "answered": positive,
-            "rejected": rejected,
             "silent": silent,
             "budgetSeconds": budget
         ]
+        summary["nrc"] = nrcCounts
+        vehicle["sweep_" + serviceName] = summary
+    }
+
+    static func nrcMeaning(_ code: String) -> String {
+        switch code.uppercased() {
+        case "10": return "general reject"
+        case "11": return "service not supported by this ECU"
+        case "12": return "sub-function not supported"
+        case "13": return "incorrect message length"
+        case "21": return "busy, repeat request"
+        case "22": return "conditions not correct"
+        case "31": return "request out of range"
+        case "33": return "security access denied"
+        case "7E": return "sub-function not supported in this session"
+        case "7F": return "service not supported in this session"
+        default: return "unknown"
+        }
     }
 
     // MARK: - Live sample

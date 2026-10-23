@@ -17,6 +17,7 @@ struct ProbeApp {
         var sampleSeconds: Double = 20
         var mode22Seconds: Double = 150
         var sweepOnly = false
+        var sweepService: UInt8 = 0x22
     }
 
     static func main() async {
@@ -119,7 +120,8 @@ struct ProbeApp {
                 bleIdentifier: candidate.peripheral.identifier.uuidString,
                 liveSampleSeconds: options.sampleSeconds,
                 mode22Seconds: options.mode22Seconds,
-                sweepOnly: options.sweepOnly
+                sweepOnly: options.sweepOnly,
+                sweepService: options.sweepService
             )
 
             finish(0)
@@ -168,6 +170,10 @@ struct ProbeApp {
                 if let value = next(), let parsed = Double(value) { options.mode22Seconds = parsed }
             case "--sweep-only":
                 options.sweepOnly = true
+            case "--service":
+                if let value = next(), let parsed = UInt8(value, radix: 16) {
+                    options.sweepService = parsed
+                }
             case "--skip-ignition":
                 options.skipIgnition = true
             case "--scan-seconds":
@@ -202,7 +208,8 @@ struct ProbeApp {
           --scan-timeout <n>    total time to keep retrying the scan (default 90)
           --sample-seconds <n>  live sampling duration (default 20, 0 disables)
           --mode22-seconds <n>  UDS identifier sweep budget (default 150, 0 disables)
-          --sweep-only          skip everything except the mode 22 identifier sweep
+          --sweep-only          skip everything except the identifier sweep
+          --service <hex>       service to sweep: 22 (default), 21, or 1A
           --ignition-wait <n>   seconds to wait for the ECU after prompting (default 180)
           --skip-ignition       adapter-only probe, no ECU queries
           --out <dir>           results directory (default Probe/results/<timestamp>)
