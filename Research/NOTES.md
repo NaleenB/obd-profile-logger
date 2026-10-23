@@ -122,3 +122,32 @@ Raw frames: `6111141F34061D` and `6112B1E6007B00E60000000000`.
 
 The decoder is implemented in `Core/Sources/OBDCore/MUT21.swift` with 8 tests
 built from these captured frames.
+
+## All 104 identifiers decoded (offline, from the 2026-10-23 capture)
+
+275 parameters resolved across 104 local identifiers using
+`DiagDB/Ecu/DIESEL4N1_06040200.exdf`. Highlights:
+
+| Item | Signal | Value | Manual expectation |
+|---|---|---|---|
+| 155 | Soot by accumulation | 2.6 g/L | 0–12.75 |
+| 156 | Soot by pressure difference | 0.3 g/L | 0–12.75 |
+| 148 | Regeneration count | 123 | 0–65,535 |
+| 116 | Regeneration requested | no | ON/OFF |
+| 153 | Distance since last regeneration | 310 km | 0–2,550 |
+| 194 | Regeneration start threshold (summation) | 9.3 g/L | — |
+| 195 | Regeneration start threshold (diff pressure) | 6.25 g/L | — |
+| 191 | Non-uniform soot accumulation | 1.0 g | 0–100 |
+| 208 | Short-interval regeneration rate | 0 | leading DPF indicator |
+| 198/199/200 | Oil level / consumption / fuel dilution | 0 / 0 / 0 cc | −1000…1500 |
+
+Interpretation: soot accumulates ~0.008 g/L per km, so the 9.3 g/L threshold is
+reached around 1,100 km — normal regeneration cadence. Zero short-interval
+regenerations means the DPF is not loading abnormally fast. No oil dilution.
+
+Also available: EGR valve position and target (items 16/17), VGT duty before and
+after compensation (142/143), injector small-injection learning for 4 cylinders
+across 5 rail pressures (78–97), AT oil temperature (144), and battery voltage
+(item 1, factor 0.0732 → 12.3 V).
+
+The decoded profile is regenerated offline; no further vehicle access was needed.

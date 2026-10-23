@@ -25,6 +25,9 @@ struct SerialPort {
     let label: String
     let write: CBCharacteristic
     let notify: CBCharacteristic
+    /// Chosen from the characteristic's advertised properties, not assumed:
+    /// some modules expose write-without-response only.
+    let writeType: CBCharacteristicWriteType
 }
 
 /// Talks to a BLE OBD-II dongle.
@@ -385,7 +388,13 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
                 $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
             }
             guard let notify, let write else { return nil }
-            return SerialPort(label: label, write: write, notify: notify)
+
+            // Prefer an acknowledged write when the characteristic allows it,
+            // otherwise use the only mode it supports.
+            let writeType: CBCharacteristicWriteType =
+                write.properties.contains(.write) ? .withResponse : .withoutResponse
+
+            return SerialPort(label: label, write: write, notify: notify, writeType: writeType)
         }
 
         let selected = pick(Self.fff0, label: "FFF0 / FFF1(notify) / FFF2(write)")
@@ -493,11 +502,12 @@ final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
             lock.unlock()
 
             let bytes = Data(payload.utf8)
-            let maxChunk = max(20, peripheral.maximumWriteValueLength(for: .withResponse))
+            let chunkLimit = peripheral.maximumWriteValueLength(for: port.writeType)
+            let maxChunk = max(1, chunkLimit)
             var offset = 0
             while offset < bytes.count {
                 let end = min(offset + maxChunk, bytes.count)
-                peripheral.writeValue(bytes.subdata(in: offset..<end), for: port.write, type: .withResponse)
+                peripheral.writeValue(bytes.subdata(in: offset..<end), for: port.write, type: port.writeType)
                 offset = end
             }
 

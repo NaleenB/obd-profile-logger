@@ -63,6 +63,19 @@ with the authority of a specification.
    state), pending DID discovery. Read-only; every DID validated against a
    factory range before use.
 
+## Credits and references
+
+- **2016 Outlander service manual** — factory data-list items and normal ranges.
+  https://jdmfsm.info/Auto/Japan/Mitsubishi/Outlander/Manuals/2016/
+- **MUT-III SE `.exdf` decryption** — Mohammad-Ali Bandzar's reverse-engineering
+  write-up established the bit-reverse + XOR `0xAA` transform.
+  https://mohammad-ali.bandzar.com/blog/reverse-engineering-mut-iii-se-decrypting-exdf-files/
+  https://mohammad-ali.bandzar.com/blog/reverse-engineering-mut-iii-se-exploring-commondb/
+- **ELM327 protocol** — ELM Electronics datasheets; cloned firmware behaves
+  differently and is treated as such throughout.
+- Thanks to the reviewers who flagged the battery-provenance, BLE write-type and
+  reading-staleness issues in the first code review.
+
 ## Known limitations
 
 Generic OBD-II on this vehicle cannot see ABS, SRS, AWD or body codes, and cannot

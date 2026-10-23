@@ -31,6 +31,16 @@ public enum Severity: String, Equatable {
     case insufficientData
 }
 
+/// What the vehicle is doing, as asserted by the caller. Health checks need this:
+/// the same voltage means different things with the engine running, the ignition
+/// on, or after the car has been parked for an hour.
+public enum PowerState: Equatable {
+    case running
+    case ignitionOn
+    /// Engine off for `settledMinutes`.
+    case resting(settledMinutes: Int)
+}
+
 /// The outcome of one check against one reading set.
 public struct Finding: Equatable {
     public let key: String
@@ -44,26 +54,64 @@ public struct Finding: Equatable {
 }
 
 /// A snapshot of a drive, in engineering units keyed by PID.
+///
+/// Every observation keeps its timestamp. Checks must read values through
+/// `fresh(_:)`, so a check can never silently combine values sampled minutes
+/// apart, or reuse a value from a poll that has since failed. The historical
+/// stream belongs in the recorder, not here.
 public struct ReadingSet {
-    public private(set) var values: [UInt8: Double] = [:]
-    public private(set) var units: [UInt8: String] = [:]
+
+    public struct Sample: Equatable {
+        public let value: Double
+        public let unit: String
+        public let atMs: Int
+
+        public init(value: Double, unit: String, atMs: Int) {
+            self.value = value
+            self.unit = unit
+            self.atMs = atMs
+        }
+    }
+
+    public private(set) var samples: [UInt8: Sample] = [:]
     public private(set) var runTimeSeconds: Double?
 
-    public init() {}
+    /// The instant this set is evaluated against, on the same monotonic clock
+    /// as each sample's `atMs`.
+    public var referenceMs: Int
 
-    public init(readings: [Reading], runTimeSeconds: Double? = nil) {
+    public init(referenceMs: Int = 0) {
+        self.referenceMs = referenceMs
+    }
+
+    public init(readings: [Reading], runTimeSeconds: Double? = nil, referenceMs: Int? = nil) {
+        self.referenceMs = referenceMs ?? (readings.map(\.atMs).max() ?? 0)
         for reading in readings {
-            values[reading.pid] = reading.value
-            units[reading.pid] = reading.unit
+            samples[reading.pid] = Sample(value: reading.value, unit: reading.unit, atMs: reading.atMs)
         }
         self.runTimeSeconds = runTimeSeconds
     }
 
-    public subscript(pid: UInt8) -> Double? { values[pid] }
+    /// Unchecked value. Prefer `fresh(_:)` inside health checks.
+    public subscript(pid: UInt8) -> Double? { samples[pid]?.value }
 
-    public mutating func set(_ pid: UInt8, _ value: Double, unit: String) {
-        values[pid] = value
-        units[pid] = unit
+    /// Value only when it was observed within `maxAgeMs` of the reference time.
+    public func fresh(_ pid: UInt8, maxAgeMs: Int = 5_000) -> Double? {
+        guard let sample = samples[pid] else { return nil }
+        let age = referenceMs - sample.atMs
+        guard age >= 0, age <= maxAgeMs else { return nil }
+        return sample.value
+    }
+
+    /// Age of the observation, or nil when there is none.
+    public func ageMs(_ pid: UInt8) -> Int? {
+        samples[pid].map { referenceMs - $0.atMs }
+    }
+
+    public func unit(_ pid: UInt8) -> String? { samples[pid]?.unit }
+
+    public mutating func set(_ pid: UInt8, _ value: Double, unit: String, atMs: Int? = nil) {
+        samples[pid] = Sample(value: value, unit: unit, atMs: atMs ?? referenceMs)
     }
 }
 
@@ -115,6 +163,10 @@ public enum VehicleSpec {
     public static let restingVoltsHealthy: ClosedRange<Double> = 12.2...12.9
     public static let restingVoltsSuspect: Double = 12.0
 
+    /// Minutes the vehicle must have been off before a voltage reading counts
+    /// as a resting measurement rather than a surface-charge artefact.
+    public static let restingSettleMinutes: Int = 30
+
     /// Convert g/s from PID 0x10 into mg per cylinder per stroke.
     /// Four cylinders, four-stroke: intake events per second = rpm / 30.
     public static func airFlowMgPerCylinder(gramsPerSecond: Double, rpm: Double) -> Double? {
@@ -132,10 +184,11 @@ public enum VehicleSpec {
 public enum HealthEvaluator {
 
     /// Idle-only checks. Caller decides when the car is actually idling.
-    public static func evaluateIdle(_ set: ReadingSet) -> [Finding] {
+    public static func evaluateIdle(_ set: ReadingSet, maxAgeMs: Int = 5_000) -> [Finding] {
         var findings: [Finding] = []
 
-        if let rpm = set[PID.rpm], let coolant = set[PID.coolant] {
+        if let rpm = set.fresh(PID.rpm, maxAgeMs: maxAgeMs),
+           let coolant = set.fresh(PID.coolant, maxAgeMs: maxAgeMs) {
             if let band = VehicleSpec.idleSpeedBand(coolantC: coolant) {
                 let severity: Severity = band.contains(rpm) ? .ok : .suspect
                 findings.append(Finding(
@@ -152,7 +205,8 @@ public enum HealthEvaluator {
             }
         }
 
-        if let rail = set[PID.railPressure], let rpm = set[PID.rpm], rpm < 900 {
+        if let rail = set.fresh(PID.railPressure, maxAgeMs: maxAgeMs),
+           let rpm = set.fresh(PID.rpm, maxAgeMs: maxAgeMs), rpm < 900 {
             let band = VehicleSpec.idleRailPressureBar
             let severity: Severity = band.contains(rail) ? .ok : .suspect
             findings.append(Finding(
@@ -168,7 +222,8 @@ public enum HealthEvaluator {
             ))
         }
 
-        if let maf = set[PID.maf], let rpm = set[PID.rpm], rpm > 0, rpm < 900,
+        if let maf = set.fresh(PID.maf, maxAgeMs: maxAgeMs),
+           let rpm = set.fresh(PID.rpm, maxAgeMs: maxAgeMs), rpm > 0, rpm < 900,
            let perCyl = VehicleSpec.airFlowMgPerCylinder(gramsPerSecond: maf, rpm: rpm) {
             let band = VehicleSpec.idleAirFlowMgPerCyl
             let severity: Severity = band.contains(perCyl) ? .ok : .suspect
@@ -189,10 +244,10 @@ public enum HealthEvaluator {
     }
 
     /// Checks that apply whenever the engine is running.
-    public static func evaluateRunning(_ set: ReadingSet) -> [Finding] {
+    public static func evaluateRunning(_ set: ReadingSet, maxAgeMs: Int = 5_000) -> [Finding] {
         var findings: [Finding] = []
 
-        if let volts = set[PID.moduleVoltage] {
+        if let volts = set.fresh(PID.moduleVoltage, maxAgeMs: maxAgeMs) {
             let band = VehicleSpec.chargingVolts
             let severity: Severity = band.contains(volts) ? .ok : .watch
             findings.append(Finding(
@@ -210,7 +265,8 @@ public enum HealthEvaluator {
 
         // A thermostat that has failed open shows as coolant never reaching
         // operating temperature despite a long run time.
-        if let coolant = set[PID.coolant], let runTime = set.runTimeSeconds ?? set[PID.runTime] {
+        if let coolant = set.fresh(PID.coolant, maxAgeMs: maxAgeMs),
+           let runTime = set.runTimeSeconds ?? set.fresh(PID.runTime, maxAgeMs: maxAgeMs) {
             if runTime > 900, coolant < 70 {
                 findings.append(Finding(
                     key: "coolant_warmup",
@@ -224,7 +280,8 @@ public enum HealthEvaluator {
             }
         }
 
-        if let map = set[PID.map], let baro = set[PID.barometric] {
+        if let map = set.fresh(PID.map, maxAgeMs: maxAgeMs),
+           let baro = set.fresh(PID.barometric, maxAgeMs: maxAgeMs) {
             let boost = VehicleSpec.boostKPa(map: map, barometric: baro)
             if boost < -10 {
                 findings.append(Finding(
@@ -244,49 +301,91 @@ public enum HealthEvaluator {
 
     /// Battery health, engine off. This is the check that catches a battery
     /// degrading weeks before it strands the car.
-    public static func evaluateBatteryResting(_ set: ReadingSet) -> [Finding] {
-        guard let volts = set[PID.moduleVoltage] else { return [] }
+    ///
+    /// A resting measurement requires the engine to have been off and the
+    /// surface charge to have dissipated. PID 0x42 read with the ignition on is
+    /// **not** a resting measurement: it includes ECU load and voltage drop, so
+    /// it gets an observation, never a battery verdict.
+    public static func evaluateBattery(
+        _ set: ReadingSet,
+        powerState: PowerState,
+        maxAgeMs: Int = 5_000
+    ) -> [Finding] {
+        guard let volts = set.fresh(PID.moduleVoltage, maxAgeMs: maxAgeMs) else { return [] }
 
-        if VehicleSpec.restingVoltsHealthy.contains(volts) {
+        switch powerState {
+        case .running:
+            return []
+
+        case .ignitionOn:
+            // Explicitly not a diagnosis. Report the observation and say why.
+            let low = volts < VehicleSpec.restingVoltsSuspect
+            return [Finding(
+                key: "voltage_ignition_on",
+                label: "Voltage, ignition on",
+                severity: low ? .watch : .ok,
+                message: low
+                    ? String(format: "%.1f V with the ignition on — not a resting measurement. Check with the engine off and settled, or measure at the terminals.", volts)
+                    : String(format: "%.1f V with the ignition on", volts),
+                source: .heuristic("ignition-on voltage includes ECU and accessory load"),
+                observed: volts,
+                unit: "V"
+            )]
+
+        case .resting(let settledMinutes):
+            guard settledMinutes >= VehicleSpec.restingSettleMinutes else {
+                return [Finding(
+                    key: "voltage_ignition_on",
+                    label: "Voltage, recently stopped",
+                    severity: .watch,
+                    message: String(format: "%.1f V only %d min after stopping — surface charge has not settled. Re-check after %d min.",
+                                    volts, settledMinutes, VehicleSpec.restingSettleMinutes),
+                    source: .heuristic("surface charge dissipates over tens of minutes"),
+                    observed: volts,
+                    unit: "V"
+                )]
+            }
+
+            if VehicleSpec.restingVoltsHealthy.contains(volts) {
+                return [Finding(
+                    key: "battery_resting",
+                    label: "Battery at rest",
+                    severity: .ok,
+                    message: String(format: "%.1f V — healthy", volts),
+                    source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
+                    observed: volts,
+                    unit: "V"
+                )]
+            }
+
+            let suspect = volts < VehicleSpec.restingVoltsSuspect
             return [Finding(
                 key: "battery_resting",
                 label: "Battery at rest",
-                severity: .ok,
-                message: String(format: "%.1f V — healthy", volts),
+                severity: suspect ? .suspect : .watch,
+                message: suspect
+                    ? String(format: "%.1f V after settling — battery is degrading", volts)
+                    : String(format: "%.1f V after settling — below the healthy 12.2-12.9 V band", volts),
                 source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
                 observed: volts,
                 unit: "V"
             )]
         }
-
-        if volts < VehicleSpec.restingVoltsSuspect {
-            return [Finding(
-                key: "battery_resting",
-                label: "Battery at rest",
-                severity: .suspect,
-                message: String(format: "%.1f V — below 12.0 V, battery is degrading", volts),
-                source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
-                observed: volts,
-                unit: "V"
-            )]
-        }
-
-        return [Finding(
-            key: "battery_resting",
-            label: "Battery at rest",
-            severity: .watch,
-            message: String(format: "%.1f V — below the healthy 12.2-12.9 V band", volts),
-            source: .heuristic("12.2-12.9 V resting band for a 12 V lead-acid battery"),
-            observed: volts,
-            unit: "V"
-        )]
     }
 
     /// Convenience: everything currently known to be checkable.
-    public static func evaluate(_ set: ReadingSet, isIdle: Bool) -> [Finding] {
+    public static func evaluate(
+        _ set: ReadingSet,
+        powerState: PowerState,
+        isIdle: Bool,
+        maxAgeMs: Int = 5_000
+    ) -> [Finding] {
         var findings: [Finding] = []
-        if isIdle { findings += evaluateIdle(set) }
-        findings += evaluateRunning(set)
+        if isIdle { findings += evaluateIdle(set, maxAgeMs: maxAgeMs) }
+        if powerState == .running {
+            findings += evaluateRunning(set, maxAgeMs: maxAgeMs)
+        }
+        findings += evaluateBattery(set, powerState: powerState, maxAgeMs: maxAgeMs)
         return findings
     }
 
