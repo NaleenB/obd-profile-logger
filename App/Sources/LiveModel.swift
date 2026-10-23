@@ -56,6 +56,7 @@ final class LiveModel {
     private var batteryLogged = false
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
+    private var intentionalDisconnect = false
 
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
@@ -110,6 +111,11 @@ final class LiveModel {
 
     func connect() {
         guard phase != .connected, phase != .connecting else { return }
+        intentionalDisconnect = false
+
+        transport.onDisconnect = { [weak self] reason in
+            Task { @MainActor in self?.handleTransportDisconnect(reason) }
+        }
         phase = .connecting
         status = "Scanning for adapter…"
 
@@ -175,7 +181,31 @@ final class LiveModel {
         }
     }
 
+    /// The link dropped on its own: out of range, unplugged, or a module reset.
+    /// This is different from the vehicle going quiet, which is normal.
+    private func handleTransportDisconnect(_ reason: String) {
+        guard !intentionalDisconnect else { return }
+
+        if isRecording {
+            session.event(.adapterDisconnected, ["reason": reason])
+            reportGapTransition(gapMonitor.finish(now: Date()))
+            stopRecording(reason: "adapter_disconnected")
+        }
+
+        pollTask?.cancel()
+        pollTask = nil
+        transport.shutdown()
+        elm = nil
+        phase = .failed("Adapter disconnected: \(reason)")
+        status = "Adapter disconnected"
+        lastRPM = nil
+        lastVolts = nil
+        batteryLogged = false
+        runningSince = nil
+    }
+
     func disconnect() {
+        intentionalDisconnect = true
         pollTask?.cancel()
         pollTask = nil
 
@@ -408,6 +438,12 @@ final class LiveModel {
                     // A write failure has stopped the session; keep sampling for
                     // the UI but stop pretending we are recording.
                     syncRecordingState()
+                }
+
+                // A sleeping vehicle will not start answering because we ask
+                // faster. Back off so a parked session is cheap.
+                if let last = lastUpdate, Date().timeIntervalSince(last) > 5 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
 
                 iteration += 1

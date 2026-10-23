@@ -72,6 +72,9 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     private var mergedServices: [UUID: Set<CBUUID>] = [:]
     public private(set) var lastScanDetails: [[String: Any]] = []
 
+    /// Called when the link drops. The caller decides whether that was expected.
+    public var onDisconnect: ((String) -> Void)?
+
     /// Called for non-fatal problems the caller may want to surface.
     public var onWarning: ((String) -> Void)?
 
@@ -319,6 +322,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.unlock()
         waiting?.resume(throwing: BLEError.writeFailed("adapter disconnected: \(message)"))
         failReady(BLEError.writeFailed("adapter disconnected: \(message)"))
+        onDisconnect?(message)
     }
 
     private func failReady(_ error: Error) {

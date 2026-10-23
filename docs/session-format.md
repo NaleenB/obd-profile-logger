@@ -86,7 +86,12 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 `data_resumed`, `dtc_snapshot`, `error`.
 
 `data_gap` / `data_resumed` bracket a stretch where the vehicle stopped
-answering while recording continued — usually ignition off. Without them a log
+answering while recording continued — usually ignition off. The adapter stays
+connected in that case, because OBD pin 16 is permanent battery power and the
+dongle never loses power; only the ECU sleeps.
+
+`adapter_disconnected` during a session means the *link* dropped (out of range,
+unplugged, module reset), which is a different event and stops the recording. Without them a log
 looks like the engine did nothing rather than that the app lost contact.
 
 Exactly one `session_started` is written per session, by `RecordingSession.start`,
