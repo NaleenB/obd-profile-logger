@@ -64,15 +64,25 @@ so a stale or mismatched value cannot silently flow into a verdict.
 
 ## Recording model
 
-Sessions are append-only NDJSON plus an events stream:
+Sessions are append-only NDJSON plus an events stream. The full on-disk contract
+is in [`session-format.md`](session-format.md).
 
-- `samples.ndjson` — one record per observation, monotonic elapsed ms
-- `events.ndjson` — connect, disconnect, gap start/end, DTC snapshot, stop
-- `manifest.json` — vehicle profile id, adapter, capability map, app version
+- `samples.ndjson` — one successful observation per line, monotonic elapsed ms
+- `events.ndjson` — lifecycle and DTC snapshots
+- `manifest.json` — profile id, adapter, app version, coverage notes
 
-Export builds CSV from these; it never stores CSV as the source of truth. A
-crash therefore costs at most one line, and any decode bug can be corrected by
-re-processing history rather than re-driving the car.
+Three rules that came out of review:
+
+1. **A failed read writes nothing.** No zeros, no carry-forward of the previous
+   value. Absence is information.
+2. **Each observation keeps its own timestamp.** Signals are read separately, so
+   they are never bundled into a synthetic "all at once" record.
+3. **NDJSON is canonical.** Export builds a ZIP; CSV is never the source of
+   truth. A crash costs at most one line, and a decode bug can be fixed by
+   re-processing history rather than re-driving the car.
+
+DTC scanning is a step-at-a-time state machine interleaved with live polling, so
+a multi-second scan never stalls sampling.
 
 ## Extension points
 

@@ -12,7 +12,9 @@ public enum DTCDecoder {
     /// already removed. Returns nil when the payload cannot be interpreted.
     public static func codes(fromHex hex: String) -> [String]? {
         let cleaned = hex.filter { !$0.isWhitespace }
-        guard let bytes = bytes(fromHex: cleaned) else { return nil }
+        // An empty payload means the service replied with no data at all, which
+        // is malformed rather than "no codes".
+        guard !cleaned.isEmpty, let bytes = bytes(fromHex: cleaned) else { return nil }
 
         // A single 0x00 byte is the "no codes stored" encoding.
         if bytes.count == 1 {

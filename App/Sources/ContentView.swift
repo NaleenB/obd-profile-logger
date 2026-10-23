@@ -24,21 +24,32 @@ struct ContentView: View {
                 }
             }
 
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Spacer(minLength: 0)
 
             controls
         }
         .padding(20)
-        .frame(minWidth: 380, minHeight: 480)
+        .frame(minWidth: 380, minHeight: 540)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("OBDLogger")
-                .font(.largeTitle.weight(.semibold))
+            HStack {
+                Text("OBDLogger")
+                    .font(.largeTitle.weight(.semibold))
+                Spacer()
+                recordingBadge
+            }
             Text(model.status)
                 .font(.subheadline)
-                .foregroundStyle(model.phase == .failed("") ? .red : .secondary)
+                .foregroundStyle(statusColor)
             if model.isConnected, !model.adapterName.isEmpty {
                 Text(model.adapterName)
                     .font(.caption)
@@ -46,6 +57,32 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var statusColor: Color {
+        if case .failed = model.phase { return .red }
+        if case .failed = model.recording { return .red }
+        return .secondary
+    }
+
+    @ViewBuilder
+    private var recordingBadge: some View {
+        switch model.recording {
+        case .recording:
+            Label("Recording", systemImage: "record.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.red)
+        case .stopped:
+            Label("Saved", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .failed:
+            Label("Recording error", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+        case .idle:
+            EmptyView()
+        }
     }
 
     private var dpfLine: String? {
@@ -69,24 +106,47 @@ struct ContentView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 12) {
-            Button(model.isConnected ? "Disconnect" : "Connect") {
-                if model.isConnected {
-                    model.disconnect()
-                } else {
-                    model.connect()
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Button(model.isConnected ? "Disconnect" : "Connect") {
+                    if model.isConnected {
+                        model.disconnect()
+                    } else {
+                        model.connect()
+                    }
                 }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(model.phase == .connecting)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(model.phase == .connecting)
 
-            Button("Record") {}
+                Button(model.isRecording ? "Stop" : "Record") {
+                    model.toggleRecording()
+                }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
-                .disabled(true)
-                .help("Recording arrives with the session recorder")
+                .disabled(!model.isConnected || !canRecord)
+            }
+
+            HStack(spacing: 12) {
+                Button("Prepare export") {
+                    model.exportLastSession()
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.lastSessionURL == nil || model.isRecording)
+
+                if let url = model.exportURL {
+                    ShareLink(item: url) {
+                        Label("Share ZIP", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
         }
+    }
+
+    private var canRecord: Bool {
+        if case .failed = model.recording { return false }
+        return true
     }
 }
 
