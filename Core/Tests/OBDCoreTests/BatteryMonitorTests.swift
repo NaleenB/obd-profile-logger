@@ -59,12 +59,17 @@ final class BatteryMonitorTests: XCTestCase {
     /// Low charging voltage is an alternator finding, not a battery one.
     func testLowChargingVoltageIsFlagged() {
         let m = BatteryMonitor()
+        // A charging verdict needs a settled window: ten seconds without the bus
+        // reaching 13.5 V is what makes a low reading meaningful.
         feed(m, [
             (0, 12.3, 0),
             (500, 10.0, 150),
             (1200, 12.4, 650),
             (3000, 12.3, 700),
-            (5000, 12.4, 700)
+            (5000, 12.4, 700),
+            (9000, 12.4, 700),
+            (13000, 12.3, 700),
+            (16000, 12.4, 700)
         ])
         let r = m.report()
         let charging = r.findings.first { $0.key == "running_voltage" }
@@ -195,5 +200,53 @@ final class BatteryReportDetailsTests: XCTestCase {
         XCTAssertEqual(details["startObserved"], "false")
         XCTAssertEqual(details["verdict"], "insufficientData")
         XCTAssertNil(details["crankMinimumVolts"])
+    }
+}
+
+/// Sequence captured from the car on 2026-10-23: ignition on, crank, recovery.
+final class BatteryMonitorRealSequenceTests: XCTestCase {
+
+    private let captured: [(Int, Double, Double?)] = [
+        (1_000, 12.20, 0),
+        (4_000, 12.20, 0),
+        (5_000, 10.90, 0),      // dip — above the absolute 10.6 V floor
+        (6_000, 11.71, 671),    // engine caught
+        (7_000, 13.01, 670),
+        (12_000, 14.14, 665),
+        (20_000, 14.19, 660),
+        (30_000, 14.22, 660)
+    ]
+
+    private func monitor() -> BatteryMonitor {
+        let monitor = BatteryMonitor()
+        for (ms, volts, rpm) in captured {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: rpm))
+        }
+        return monitor
+    }
+
+    /// The first version missed this start entirely: the dip never went below
+    /// 10.6 V and the RPM sample landed after the engine had already caught.
+    func testRelativeDipDetectsTheCrank() {
+        let report = monitor().report()
+        XCTAssertTrue(report.startObserved)
+        XCTAssertEqual(report.phaseReached, .running)
+        XCTAssertEqual(try! XCTUnwrap(report.crankMinimumVolts), 10.9, accuracy: 0.001)
+    }
+
+    /// Charging voltage must come from settled samples, not the recovery ramp.
+    func testChargingVoltageIgnoresRecoveryRamp() {
+        let report = monitor().report()
+        XCTAssertEqual(try! XCTUnwrap(report.runningVolts), 14.19, accuracy: 0.05)
+        XCTAssertGreaterThan(report.runningVolts ?? 0, 14.0,
+                             "reporting 12.8 V during recovery would look like a failed alternator")
+    }
+
+    func testChargingSettlesOnceRecovered() {
+        XCTAssertTrue(monitor().chargingSettled)
+    }
+
+    func testVerdictIsHealthyForThisStart() {
+        XCTAssertEqual(monitor().report().verdict, .ok)
     }
 }

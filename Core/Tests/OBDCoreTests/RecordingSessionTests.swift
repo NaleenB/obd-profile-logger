@@ -171,3 +171,72 @@ final class RecordingSessionTests: XCTestCase {
         }
     }
 }
+
+final class SessionEventOrderTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-order-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    /// Events written before the session starts are dropped, so the app must
+    /// start recording first. This test pins that behaviour down.
+    func testEventBeforeStartIsDiscarded() throws {
+        let session = RecordingSession()
+        XCTAssertFalse(session.event(.adapterConnected, ["adapter": "Viecar"]))
+        XCTAssertEqual(session.state, .idle)
+    }
+
+    func testAdapterEventAfterStartIsWritten() throws {
+        let session = RecordingSession()
+        let manifest = SessionManifest(
+            sessionID: SessionStore.makeSessionID(),
+            startedAt: WallClock.iso(),
+            appVersion: "test"
+        )
+        try session.start(manifest: manifest, root: root)
+        XCTAssertTrue(session.event(.adapterConnected, ["adapter": "Viecar"]))
+        session.stop(reason: "user")
+
+        let directory = try XCTUnwrap(session.directory)
+        let text = try String(contentsOf: directory.appendingPathComponent("events.ndjson"), encoding: .utf8)
+        let types = try text.split(separator: "\n").compactMap { line -> String? in
+            let object = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            return object?["type"] as? String
+        }
+        XCTAssertEqual(types.filter { $0 == "adapter_connected" }.count, 1)
+    }
+
+    func testManifestCarriesCapabilityDiscovery() throws {
+        let manifest = SessionManifest(
+            sessionID: "x",
+            startedAt: WallClock.iso(),
+            appVersion: "test",
+            supportedPIDs: ["05", "0C", "0D"],
+            capabilityDiscovery: "succeeded"
+        )
+        let data = try JSONEncoder().encode(manifest)
+        let decoded = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(decoded.supportedPIDs, ["05", "0C", "0D"])
+        XCTAssertEqual(decoded.capabilityDiscovery, "succeeded")
+    }
+
+    func testFailedDiscoveryIsDistinguishableFromEmptySupport() throws {
+        let failed = SessionManifest(sessionID: "x", startedAt: WallClock.iso(),
+                                     appVersion: "test", supportedPIDs: nil,
+                                     capabilityDiscovery: "failed")
+        let empty = SessionManifest(sessionID: "y", startedAt: WallClock.iso(),
+                                    appVersion: "test", supportedPIDs: [],
+                                    capabilityDiscovery: "succeeded")
+        XCTAssertNil(failed.supportedPIDs)
+        XCTAssertEqual(empty.supportedPIDs, [])
+        XCTAssertNotEqual(failed.capabilityDiscovery, empty.capabilityDiscovery)
+    }
+}

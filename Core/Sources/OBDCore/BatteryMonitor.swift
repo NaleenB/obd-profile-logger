@@ -57,12 +57,18 @@ public final class BatteryMonitor {
     public static let crankRpm = 60.0
     public static let runningRpm = 400.0
     public static let crankDipVolts = 10.6
+    /// A drop this far below the pre-crank baseline counts as cranking even if
+    /// the absolute floor is not reached. Crank dips on this car bottom out
+    /// around 10.6-10.9 V, above the absolute threshold.
+    public static let crankDropVolts = 0.4
     public static let recoveryVolts = 13.5
 
     private var samples: [VoltageSample] = []
     private var phase: BatteryPhase = .unknown
     private(set) public var observedCrank = false
     private var preCrankVolts: Double?
+    private var preCrankBaseline: Double?
+    private var chargingRecovered = false
     private var crankMinimum: Double?
     private var crankStartMs: Int?
     private var runningStartMs: Int?
@@ -92,6 +98,7 @@ public final class BatteryMonitor {
         switch phase {
         case .ignitionOn:
             preCrankVolts = sample.volts
+            preCrankBaseline = max(preCrankBaseline ?? sample.volts, sample.volts)
 
         case .cranking:
             crankMinimum = min(crankMinimum ?? sample.volts, sample.volts)
@@ -102,12 +109,16 @@ public final class BatteryMonitor {
                 runningStartMs = sample.atMs
                 preCrankVolts = preCrankVolts ?? previousVoltsBefore(sample.atMs)
             }
-            // Ignore the first second: that is the alternator spinning up, not
-            // steady-state charging.
             if let start = runningStartMs, sample.atMs - start > 1_000 {
-                runningVoltages.append(sample.volts)
-                if recoveryMs == nil, sample.volts >= Self.recoveryVolts {
-                    recoveryMs = sample.atMs - start
+                if sample.volts >= Self.recoveryVolts {
+                    if recoveryMs == nil { recoveryMs = sample.atMs - start }
+                    chargingRecovered = true
+                }
+                // Only count samples once the alternator has taken over, or
+                // after ten seconds if it never does — in that case the low
+                // reading is the finding.
+                if chargingRecovered || sample.atMs - start > 10_000 {
+                    runningVoltages.append(sample.volts)
                 }
             }
 
@@ -131,6 +142,10 @@ public final class BatteryMonitor {
         // ECU never reported RPM during the crank.
         if sample.volts >= Self.recoveryVolts { return .running }
         if sample.volts < Self.crankDipVolts { return .cranking }
+        // Relative drop: a battery that only sags to 10.9 V still cranked.
+        if let baseline = preCrankBaseline, baseline - sample.volts >= Self.crankDropVolts {
+            return .cranking
+        }
         return .ignitionOn
     }
 
@@ -220,6 +235,13 @@ public final class BatteryMonitor {
     }
 
     /// Median of the settled running samples: robust against the odd bad read.
+    /// True once a plausible charging voltage has been seen, or enough time has
+    /// passed that the absence of one is itself the finding.
+    public var chargingSettled: Bool {
+        guard let start = runningStartMs else { return false }
+        return chargingRecovered || (samples.last.map { $0.atMs - start > 10_000 } ?? false)
+    }
+
     private func runningVolts() -> Double? {
         guard !runningVoltages.isEmpty else { return nil }
         let sorted = runningVoltages.sorted()

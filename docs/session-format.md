@@ -32,7 +32,8 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 | `appVersion` | build that wrote the session |
 | `vehicleProfileID` | profile assumed by this build, or null |
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
-| `supportedPIDs` | null when capability discovery was not run |
+| `supportedPIDs` | full capability set discovered at connect; null when discovery failed |
+| `capabilityDiscovery` | `succeeded` or `failed` — an empty list alone cannot say which |
 | `notes` | free-form, including what the recording did **not** cover |
 
 Nothing is invented. A value the app could not determine is omitted or null.
@@ -93,6 +94,8 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 answering while recording continued — usually ignition off. The adapter stays
 connected in that case, because OBD pin 16 is permanent battery power and the
 dongle never loses power; only the ECU sleeps.
+
+`adapter_connected` is written after the session starts, so it always appears.
 
 `adapter_disconnected` during a session means the *link* dropped (out of range,
 unplugged, module reset), which is a different event and stops the recording. Without them a log

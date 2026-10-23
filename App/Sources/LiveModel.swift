@@ -114,9 +114,15 @@ final class LiveModel {
     /// dropped from the list instead.
     private(set) var signals: [VehicleProfile.StandardSignal] = []
 
-    /// PIDs the ECU advertised. Empty means discovery has not run or failed, in
-    /// which case nothing is filtered out.
+    enum DiscoveryState: Equatable {
+        case notRun
+        case succeeded
+        case failed
+    }
+
+    /// PIDs the ECU advertised, and whether asking worked at all.
     private(set) var supportedPIDs: Set<UInt8> = []
+    private(set) var discovery: DiscoveryState = .notRun
 
     /// Module headers for DTC scans. Falls back to the near-universal CAN
     /// engine/transmission pair when a profile does not say.
@@ -197,10 +203,11 @@ final class LiveModel {
                 // Read DPF once for immediate display. Recording is usually not
                 // active yet; the profile sweep records these same LIDs when it is.
                 await readDPF()
-                session.event(.adapterConnected, ["adapter": adapterName])
 
                 // Recording is automatic: connecting is the intent to record.
+                // Start it first so the connection event is not discarded.
                 startRecording()
+                session.event(.adapterConnected, ["adapter": adapterName])
                 startPolling()
             } catch {
                 phase = .failed("\(error)")
@@ -270,7 +277,10 @@ final class LiveModel {
             vehicleProfileID: profileID,
             adapterName: adapterName.isEmpty ? nil : adapterName,
             adapterIdentifier: transport.adapterIdentifier.isEmpty ? nil : transport.adapterIdentifier,
-            supportedPIDs: nil,
+            supportedPIDs: discovery == .succeeded
+                ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
+                : nil,
+            capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
             notes: [
                 "Standard PIDs plus service 0x21 manufacturer observations.",
                 "DTC scans cover the engine (7E0) and transmission (7E1) only."
@@ -364,7 +374,8 @@ final class LiveModel {
         // snapshot has no charging voltage to show.
         guard !batteryLogged,
               let since = runningSince,
-              Date().timeIntervalSince(since) >= 5
+              Date().timeIntervalSince(since) >= 12,
+              battery.chargingSettled
         else { return }
 
         batteryLogged = true
@@ -414,6 +425,9 @@ final class LiveModel {
             if supported.isEmpty { break }
         }
         supportedPIDs = found
+        // A valid bitmap always advertises at least one PID, so an empty result
+        // means every probe failed rather than "this car supports nothing".
+        discovery = found.isEmpty ? .failed : .succeeded
     }
 
     /// Profile signals if it has any, otherwise the generic baseline — then
@@ -422,19 +436,19 @@ final class LiveModel {
         let base = profile?.signals ?? []
         let chosen = base.isEmpty ? GenericSignals.defaults : base
 
-        if supportedPIDs.isEmpty {
+        guard discovery == .succeeded else {
+            // We could not ask, so show what we have rather than nothing.
             signals = chosen
             return
         }
 
-        let filtered = chosen.filter { signal in
+        // Discovery succeeded: trust it. A PID the ECU does not advertise is
+        // dropped, even if that leaves the dashboard empty — showing tiles that
+        // can never populate is worse than an honest empty state.
+        signals = chosen.filter { signal in
             guard let pid = signal.pidValue else { return false }
             return supportedPIDs.contains(pid)
         }
-
-        // Never end up with an empty dashboard just because discovery was odd:
-        // if the filter removes everything, keep the unfiltered set.
-        signals = filtered.isEmpty ? chosen : filtered
     }
 
     // MARK: - Polling

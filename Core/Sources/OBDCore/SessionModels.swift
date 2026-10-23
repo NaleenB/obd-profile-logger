@@ -22,7 +22,12 @@ public struct SessionManifest: Codable, Equatable {
     public var vehicleProfileID: String?
     public var adapterName: String?
     public var adapterIdentifier: String?
+    /// Full capability set discovered at connect, sorted hex. Nil when
+    /// discovery did not succeed — distinct from "discovered nothing".
     public var supportedPIDs: [String]?
+    /// "succeeded" or "failed". An empty `supportedPIDs` alone cannot express
+    /// the difference between "the car supports nothing" and "we could not ask".
+    public var capabilityDiscovery: String?
     public var notes: [String]
 
     public init(
@@ -35,6 +40,7 @@ public struct SessionManifest: Codable, Equatable {
         adapterName: String? = nil,
         adapterIdentifier: String? = nil,
         supportedPIDs: [String]? = nil,
+        capabilityDiscovery: String? = nil,
         notes: [String] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -46,6 +52,7 @@ public struct SessionManifest: Codable, Equatable {
         self.adapterName = adapterName
         self.adapterIdentifier = adapterIdentifier
         self.supportedPIDs = supportedPIDs
+        self.capabilityDiscovery = capabilityDiscovery
         self.notes = notes
     }
 }
