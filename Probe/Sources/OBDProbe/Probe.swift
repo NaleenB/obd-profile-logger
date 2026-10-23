@@ -38,11 +38,26 @@ final class Probe {
         bleIdentifier: String,
         scanModules: Bool = true,
         liveSampleSeconds: TimeInterval = 20,
-        mode22Seconds: TimeInterval = 150
+        mode22Seconds: TimeInterval = 150,
+        sweepOnly: Bool = false
     ) async throws {
         connectedPortLabel = portLabel
         adapter["bleName"] = bleName.isEmpty ? "(unnamed)" : bleName
         adapter["bleIdentifier"] = bleIdentifier
+
+        if sweepOnly {
+            try await handshake()
+            if skipIgnition {
+                notes.append("Ignition wait skipped by request.")
+            } else {
+                _ = try await waitForECU(maxWait: ignitionWait)
+            }
+            try await pinProtocol()
+            try await sweepMode22(budget: mode22Seconds)
+            try await readDTCs()
+            try writeOutputs()
+            return
+        }
 
         try await identifyAdapter()
         try await handshake()
