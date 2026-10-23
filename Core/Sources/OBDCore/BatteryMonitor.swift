@@ -238,3 +238,26 @@ extension BatteryPhase {
         }
     }
 }
+
+public extension BatteryReport {
+
+    /// Flattened for `events.ndjson`. Kept here so the formatting is tested
+    /// rather than living in a view.
+    var eventDetails: [String: String] {
+        var details: [String: String] = [
+            "phase": phaseReached.rawValue,
+            "startObserved": startObserved ? "true" : "false",
+            "verdict": verdict.rawValue,
+            "samples": String(sampleCount)
+        ]
+        if let value = preCrankVolts { details["preCrankVolts"] = String(format: "%.2f", value) }
+        if let value = crankMinimumVolts { details["crankMinimumVolts"] = String(format: "%.2f", value) }
+        if let value = runningVolts { details["runningVolts"] = String(format: "%.2f", value) }
+        if let value = crankDurationMs { details["crankDurationMs"] = String(value) }
+        if let value = recoveryMs { details["recoveryMs"] = String(value) }
+        for finding in findings {
+            details["finding.\(finding.key)"] = finding.severity.rawValue
+        }
+        return details
+    }
+}

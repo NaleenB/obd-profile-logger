@@ -48,6 +48,13 @@ final class LiveModel {
     private var elm: ELMClient?
     private var pollTask: Task<Void, Never>?
 
+    private let battery = BatteryMonitor()
+    private let batteryClock = UptimeClock()
+    private var lastVolts: Double?
+    private var lastRPM: Double?
+    private(set) var batteryReport: BatteryReport?
+    private var batteryLogged = false
+
     private var scanner: DTCScanner?
     private var lastScanSignature: String?
     private var profileIndex = 0
@@ -138,6 +145,11 @@ final class LiveModel {
 
                 await discoverCapabilities(using: client)
                 rebuildSignalList()
+
+                lastVolts = nil
+                lastRPM = nil
+                batteryLogged = false
+                batteryReport = nil
 
                 phase = .connected
                 status = signals.isEmpty ? "Connected — no supported PIDs found" : "Connected"
@@ -265,6 +277,25 @@ final class LiveModel {
         }
     }
 
+    // MARK: - Battery
+
+    private func feedBatteryMonitor(pid: UInt8, value: Double) {
+        switch pid {
+        case 0x42: lastVolts = value
+        case 0x0C: lastRPM = value
+        default: return
+        }
+        guard let volts = lastVolts else { return }
+
+        battery.ingest(VoltageSample(atMs: batteryClock.nowMs(), volts: volts, rpm: lastRPM))
+
+        guard !batteryLogged, battery.currentPhase == .running else { return }
+        batteryLogged = true
+        let report = battery.report()
+        batteryReport = report
+        session.event(.batteryTest, report.eventDetails)
+    }
+
     // MARK: - Capability discovery
 
     private(set) var protocolDescription = ""
@@ -331,6 +362,14 @@ final class LiveModel {
                     await sample(signal, using: elm)
                 }
 
+                // A crank lasts one to two seconds. While the engine is off,
+                // sample voltage a second time per cycle so the dip is caught.
+                if (lastRPM ?? 0) < 400,
+                   let voltage = signals.first(where: { $0.pid == "42" }) {
+                    if Task.isCancelled { return }
+                    await sample(voltage, using: elm)
+                }
+
                 if Task.isCancelled { return }
                 await stepDTCScan(using: elm)
 
@@ -363,6 +402,8 @@ final class LiveModel {
 
         values[signal.pid] = value
         lastUpdate = Date()
+
+        feedBatteryMonitor(pid: pid, value: value)
 
         if isRecording {
             let written = session.sample(

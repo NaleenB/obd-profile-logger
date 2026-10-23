@@ -32,6 +32,10 @@ struct ContentView: View {
                 }
             }
 
+            if let battery = model.batteryReport, battery.startObserved {
+                batteryLine(battery)
+            }
+
             if !model.manufacturerHighlights.isEmpty {
                 manufacturerSection
             }
@@ -98,6 +102,21 @@ struct ContentView: View {
         case .idle:
             EmptyView()
         }
+    }
+
+    private func batteryLine(_ report: BatteryReport) -> some View {
+        var parts: [String] = []
+        if let crank = report.crankMinimumVolts {
+            parts.append(String(format: "crank %.1f V", crank))
+        }
+        if let running = report.runningVolts {
+            parts.append(String(format: "charging %.1f V", running))
+        }
+        return Text(parts.isEmpty ? "Battery: no start observed" : "Battery: " + parts.joined(separator: " · "))
+            .font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var manufacturerSection: some View {

@@ -104,6 +104,7 @@ Research/   how the manufacturer data was obtained
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit
 - [`docs/protocol-notes.md`](docs/protocol-notes.md) — ELM327 and Mitsubishi quirks, written for any language
 - [`docs/session-format.md`](docs/session-format.md) — the on-disk contract
+- [`docs/first-drive-checklist.md`](docs/first-drive-checklist.md) — hardware verification
 - [`profiles/README.md`](profiles/README.md) — adding a vehicle
 
 ## Status

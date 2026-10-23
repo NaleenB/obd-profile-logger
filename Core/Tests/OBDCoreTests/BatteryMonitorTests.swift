@@ -167,3 +167,33 @@ final class BatteryMonitorStartTests: XCTestCase {
         XCTAssertEqual(report.verdict, .ok)
     }
 }
+
+final class BatteryReportDetailsTests: XCTestCase {
+
+    func testEventDetailsCarryTheUsefulNumbers() {
+        let monitor = BatteryMonitor()
+        for (ms, volts, rpm) in [(0, 12.4, 0.0), (500, 9.9, 150.0), (1500, 14.1, 700.0), (3000, 14.2, 700.0)] {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: rpm))
+        }
+        let details = monitor.report().eventDetails
+
+        XCTAssertEqual(details["startObserved"], "true")
+        XCTAssertEqual(details["verdict"], "ok")
+        XCTAssertEqual(details["crankMinimumVolts"], "9.90")
+        // The first second after the engine catches is the alternator spinning
+        // up, so it is excluded; 14.2 is the only settled reading here.
+        XCTAssertEqual(details["runningVolts"], "14.20")
+        XCTAssertEqual(details["finding.crank_minimum"], "ok")
+    }
+
+    func testIncompleteStartIsMarkedInDetails() {
+        let monitor = BatteryMonitor()
+        for (ms, volts) in [(0, 14.1), (1000, 14.2)] {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: 700))
+        }
+        let details = monitor.report().eventDetails
+        XCTAssertEqual(details["startObserved"], "false")
+        XCTAssertEqual(details["verdict"], "insufficientData")
+        XCTAssertNil(details["crankMinimumVolts"])
+    }
+}
