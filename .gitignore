@@ -5,3 +5,4 @@ results/
 *.xcworkspace/xcuserdata/
 .DS_Store
 DerivedData/
+.research/
