@@ -26,7 +26,9 @@ caffeinate -dimsu
 
 ## The sequence
 
-1. Launch the app, press **Connect**. Wait for tiles to show values.
+1. Launch the app (`cd App && ./run.sh`), press **Connect**. The first connect
+   triggers a macOS Bluetooth permission prompt — allow it. Wait for tiles to
+   show values.
 2. Confirm the DPF line appears (soot, regeneration count).
 3. Press **Record**.
 4. Start the engine. This is the battery test — it should register a crank.

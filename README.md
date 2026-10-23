@@ -59,8 +59,8 @@ cd OBDLogger
 # Discover what your car exposes — no app needed
 cd Probe && ./run.sh
 
-# Or run the app
-cd ../App && xcodegen generate && open OBDLogger.xcodeproj
+# Or run the app — builds and launches, no Xcode UI needed
+cd ../App && ./run.sh
 ```
 
 The probe is the fastest way to find out whether a vehicle supports a manufacturer
