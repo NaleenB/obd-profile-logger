@@ -111,6 +111,13 @@ times a second. `regen_ended` carries the duration, peak temperature, and the so
 figure before and after where available. A regeneration still running when the
 session ends is closed with `truncated: true` rather than dropped.
 
+When the link drops during a recording, the session is **not** closed. The app
+records `adapter_disconnected`, then `data_gap`, and retries the connection for up
+to ten minutes with backoff. On success it writes `adapter_reconnected` and
+continues the same session, so a walk out of range and back produces one file
+rather than two. If the ten minutes expire the session is stopped with reason
+`reconnect_timeout`.
+
 `adapter_disconnected` during a session means the *link* dropped (out of range,
 unplugged, module reset), which is a different event and stops the recording. Without them a log
 looks like the engine did nothing rather than that the app lost contact.

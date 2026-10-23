@@ -11,6 +11,7 @@ final class LiveModel {
         case idle
         case connecting
         case connected
+        case reconnecting
         case failed(String)
     }
 
@@ -76,6 +77,7 @@ final class LiveModel {
     private var regenDetector = RegenDetector()
     private var regenSootAtStart: Double?
     private var stallWatchdog: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var connectedAt: Date?
 
     private var scanner: DTCScanner?
@@ -268,6 +270,7 @@ final class LiveModel {
 
     func connect() {
         guard phase != .connected, phase != .connecting else { return }
+        cancelReconnect()
         intentionalDisconnect = false
 
         transport.onDisconnect = { [weak self] reason in
@@ -357,24 +360,94 @@ final class LiveModel {
     private func handleTransportDisconnect(_ reason: String) {
         guard !intentionalDisconnect else { return }
 
-        if isRecording {
-            session.event(.adapterDisconnected, ["reason": reason])
-            reportGapTransition(gapMonitor.finish(now: Date()))
-            stopRecording(reason: "adapter_disconnected")
-        }
-
         pollTask?.cancel()
         pollTask = nil
         transport.shutdown()
         elm = nil
-        phase = .failed("Adapter disconnected: \(reason)")
-        status = "Adapter disconnected"
+        inFlightSince = nil
         readings.clear()
         dpf = nil
         lastRPM = nil
         lastVolts = nil
         batteryLogged = false
         runningSince = nil
+
+        session.event(.adapterDisconnected, ["reason": reason])
+        reportGapTransition(gapMonitor.finish(now: Date()))
+
+        // The link dropping is usually distance, not a decision. Keep the
+        // session open and try to pick it back up.
+        if isRecording {
+            beginReconnect()
+        } else {
+            phase = .failed("Adapter disconnected: \(reason)")
+            status = "Adapter disconnected"
+        }
+    }
+
+    // MARK: - Reconnection
+
+    /// Retries for the same ten minutes the idle rule allows, then gives up and
+    /// finalises. Backs off so a phone in a pocket is not scanning constantly.
+    private func beginReconnect() {
+        guard reconnectTask == nil else { return }
+        phase = .reconnecting
+        status = "Reconnecting…"
+
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            let deadline = Date().addingTimeInterval(600)
+            var attempt = 0
+            var delay: UInt64 = 2_000_000_000
+
+            while !Task.isCancelled, Date() < deadline {
+                attempt += 1
+                self.status = "Reconnecting… (attempt \(attempt))"
+
+                do {
+                    try await self.transport.start()
+                    let candidate = try await self.transport.findAdapter(scanSeconds: 6, nameFilter: nil)
+                    let port = try await self.transport.connect(candidate)
+                    _ = port
+
+                    let client = ELMClient(transport: self.transport, logger: nil)
+                    _ = try? await client.send("ATE0", timeout: 2)
+                    _ = try? await client.send("ATS0", timeout: 2)
+                    _ = try? await client.send("ATH0", timeout: 2)
+                    if let protocolValue = self.profile?.elmProtocol {
+                        _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
+                    }
+
+                    self.elm = client
+                    KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
+                    self.phase = .connected
+                    self.status = "Connected"
+                    self.session.event(.adapterReconnected, [
+                        "attempt": String(attempt),
+                        "adapter": candidate.name
+                    ])
+                    self.gapMonitor = DataGapMonitor(threshold: 10)
+                    self.startPolling()
+                    self.reconnectTask = nil
+                    return
+                } catch {
+                    self.transport.shutdown()
+                    try? await Task.sleep(nanoseconds: delay)
+                    delay = min(delay * 2, 10_000_000_000)
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            self.stopRecording(reason: "reconnect_timeout")
+            self.phase = .failed("Adapter disconnected")
+            self.status = "Adapter disconnected"
+            self.reconnectTask = nil
+        }
+    }
+
+    private func cancelReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
     }
 
     enum DisconnectReason: String {
@@ -384,6 +457,7 @@ final class LiveModel {
 
     func disconnect(reason: DisconnectReason = .user) {
         intentionalDisconnect = true
+        cancelReconnect()
         pollTask?.cancel()
         pollTask = nil
 

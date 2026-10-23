@@ -130,6 +130,7 @@ struct ContentView: View {
 
     private var statusColor: Color {
         if case .failed = model.phase { return .red }
+        if case .reconnecting = model.phase { return .orange }
         if case .failed = model.recording { return .red }
         return .secondary
     }
@@ -224,8 +225,8 @@ struct ContentView: View {
     private var controls: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Button(model.isConnected ? "Disconnect" : "Connect") {
-                    if model.isConnected {
+                Button(model.isConnected || model.phase == .reconnecting ? "Disconnect" : "Connect") {
+                    if model.isConnected || model.phase == .reconnecting {
                         model.disconnect()
                     } else {
                         model.connect()
