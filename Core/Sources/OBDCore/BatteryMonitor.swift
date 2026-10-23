@@ -69,6 +69,7 @@ public final class BatteryMonitor {
     private var preCrankVolts: Double?
     private var preCrankBaseline: Double?
     private var chargingRecovered = false
+    private var engineStopped = false
     private var crankMinimum: Double?
     private var crankStartMs: Int?
     private var runningStartMs: Int?
@@ -85,6 +86,14 @@ public final class BatteryMonitor {
 
         let previous = phase
         let next = classify(sample)
+
+        // Once the engine has been seen running, an RPM below idle means it was
+        // switched off. Latching "running" is right for the phase, but charging
+        // voltage must stop being collected or a shutdown reading is graded as
+        // an alternator fault.
+        if phase == .running, let rpm = sample.rpm, rpm < Self.runningRpm {
+            engineStopped = true
+        }
 
         // Record a start event only when a crank was actually seen, whether from
         // RPM or from the voltage dip fallback.
@@ -109,6 +118,7 @@ public final class BatteryMonitor {
                 runningStartMs = sample.atMs
                 preCrankVolts = preCrankVolts ?? previousVoltsBefore(sample.atMs)
             }
+            if engineStopped { return }
             if let start = runningStartMs, sample.atMs - start > 1_000 {
                 if sample.volts >= Self.recoveryVolts {
                     if recoveryMs == nil { recoveryMs = sample.atMs - start }
@@ -239,7 +249,10 @@ public final class BatteryMonitor {
     /// passed that the absence of one is itself the finding.
     public var chargingSettled: Bool {
         guard let start = runningStartMs else { return false }
-        return chargingRecovered || (samples.last.map { $0.atMs - start > 10_000 } ?? false)
+        // A stopped engine produces no more charging data, so report what we
+        // have rather than waiting forever.
+        if chargingRecovered || engineStopped { return true }
+        return samples.last.map { $0.atMs - start > 10_000 } ?? false
     }
 
     private func runningVolts() -> Double? {

@@ -250,3 +250,47 @@ final class BatteryMonitorRealSequenceTests: XCTestCase {
         XCTAssertEqual(monitor().report().verdict, .ok)
     }
 }
+
+/// Session captured on 2026-10-23 04:46: engine ran for eight seconds, then was
+/// switched off while the app kept recording.
+final class BatteryMonitorShutdownTests: XCTestCase {
+
+    private let captured: [(Int, Double, Double?)] = [
+        (0, 12.40, 0),
+        (1_000, 10.38, 0),
+        (2_000, 12.24, 0),
+        (4_000, 12.28, 0),
+        (6_000, 13.21, 636),
+        (8_000, 14.27, 653),
+        (9_000, 12.81, 108),
+        (11_000, 12.70, 0),
+        (15_000, 12.69, 0),
+        (20_000, 12.69, 0)
+    ]
+
+    private func report() -> BatteryReport {
+        let monitor = BatteryMonitor()
+        for (ms, volts, rpm) in captured {
+            monitor.ingest(VoltageSample(atMs: ms, volts: volts, rpm: rpm))
+        }
+        return monitor.report()
+    }
+
+    /// Post-shutdown voltage must not be graded as an alternator fault.
+    func testChargingVoltageIsTakenWhileTheEngineRan() {
+        let report = report()
+        XCTAssertEqual(try! XCTUnwrap(report.runningVolts), 14.27, accuracy: 0.05)
+        XCTAssertGreaterThan(report.runningVolts ?? 0, 13.5)
+    }
+
+    func testNoLowChargingFindingAfterShutdown() {
+        let findings = report().findings
+        XCTAssertNil(findings.first { $0.key == "running_voltage" && $0.severity != .ok })
+    }
+
+    func testCrankStillDetected() {
+        let report = report()
+        XCTAssertTrue(report.startObserved)
+        XCTAssertEqual(try! XCTUnwrap(report.crankMinimumVolts), 10.38, accuracy: 0.001)
+    }
+}

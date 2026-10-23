@@ -123,6 +123,7 @@ final class LiveModel {
     /// PIDs the ECU advertised, and whether asking worked at all.
     private(set) var supportedPIDs: Set<UInt8> = []
     private(set) var discovery: DiscoveryState = .notRun
+    private var discoveryRetryDone = false
 
     /// Module headers for DTC scans. Falls back to the near-universal CAN
     /// engine/transmission pair when a profile does not say.
@@ -189,6 +190,7 @@ final class LiveModel {
                 batteryLogged = false
                 batteryReport = nil
                 runningSince = nil
+                discoveryRetryDone = false
                 gapMonitor = DataGapMonitor(threshold: 10)
 
                 connectedAt = Date()
@@ -374,7 +376,7 @@ final class LiveModel {
         // snapshot has no charging voltage to show.
         guard !batteryLogged,
               let since = runningSince,
-              Date().timeIntervalSince(since) >= 12,
+              Date().timeIntervalSince(since) >= 5,
               battery.chargingSettled
         else { return }
 
@@ -520,6 +522,14 @@ final class LiveModel {
         values[signal.pid] = value
         lastUpdate = Date()
         reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
+
+        // The ECU may have been asleep when we probed. Now that it is answering,
+        // ask again so an unnecessary empty capability set is not recorded.
+        if discovery == .failed, !discoveryRetryDone {
+            discoveryRetryDone = true
+            await discoverCapabilities(using: elm)
+            rebuildSignalList()
+        }
 
         feedBatteryMonitor(pid: pid, value: value)
 
