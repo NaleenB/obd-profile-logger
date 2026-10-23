@@ -51,7 +51,11 @@ struct SessionsView: View {
             Divider()
             footer
         }
+        #if os(macOS)
+        // A comfortable sheet on a desktop window; meaningless on a phone, where
+        // it would push the content wider than the screen.
         .frame(minWidth: 480, minHeight: 440)
+        #endif
         .onAppear { reload() }
         .confirmationDialog(
             "Delete this session?",

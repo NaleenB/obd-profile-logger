@@ -55,7 +55,9 @@ struct ContentView: View {
             controls
         }
         .padding(20)
+        #if os(macOS)
         .frame(minWidth: 380, minHeight: 540)
+        #endif
         .sheet(isPresented: $showingSessions) {
             SessionsView(activeSessionID: model.activeSessionID) { deleted in
                 model.handleSessionsDeleted(deleted)
