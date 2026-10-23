@@ -125,6 +125,12 @@ public struct ELMResponse {
         return meaningful.isEmpty ? "(empty reply)" : meaningful.joined(separator: " / ")
     }
 
+    /// True when the adapter answered a configuration command with "OK".
+    /// Distinguishes an accepted command from a silent or refused one.
+    public var isOK: Bool {
+        lines.contains { $0.trimmingCharacters(in: .whitespaces).uppercased() == "OK" }
+    }
+
     public var failed: Bool {
         let joined = lines.joined(separator: " ").uppercased()
         return ["NO DATA", "UNABLE TO CONNECT", "STOPPED", "ERROR", "?"].contains {

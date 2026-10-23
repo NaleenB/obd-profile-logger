@@ -208,15 +208,15 @@ final class LiveModel {
         )
 
         do {
-            try session.start(manifest: manifest)
+            try session.start(
+                manifest: manifest,
+                details: ["polledPIDs": signals.map(\.pid).joined(separator: ",")]
+            )
             syncRecordingState()
             lastSessionURL = session.directory
             if let existing = exportURL { SessionArchive.discard(existing) }
             exportURL = nil
             notice = nil
-            session.event(.sessionStarted, [
-                "polledPIDs": signals.map(\.pid).joined(separator: ",")
-            ])
         } catch {
             recording = .failed("\(error)")
             notice = "\(error)"
@@ -396,7 +396,15 @@ final class LiveModel {
             scanner = nil
             completeScan(active.diagnostics, outcomes: active.outcomeDetails)
         case .request(let request):
-            _ = try? await elm.send("ATSH" + request.header, timeout: 2)
+            // Only query once the adapter has acknowledged the header. Sending
+            // anyway could get an answer from the wrong module and attribute it
+            // to this one.
+            let headerReply = try? await elm.send("ATSH" + request.header, timeout: 2)
+            guard headerReply?.isOK == true else {
+                active.ingestHeaderFailure()
+                scanner = active
+                return
+            }
             let reply = try? await elm.send(request.command, timeout: 3)
             active.ingest(responseHex: reply?.payloadHex)
             scanner = active

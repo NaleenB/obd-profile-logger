@@ -84,15 +84,21 @@ NTP, user change) cannot make session time go backwards.
 Types: `session_started`, `session_stopped`, `adapter_connected`,
 `adapter_disconnected`, `recording_interrupted`, `dtc_snapshot`, `error`.
 
-Lifecycle events are idempotent: `finish` writes at most one
-`session_stopped`, and a repeated stop is a no-op.
+Exactly one `session_started` is written per session, by `RecordingSession.start`,
+with caller metadata merged in. Lifecycle events are idempotent: `finish` writes
+at most one `session_stopped`, and a repeated stop is a no-op.
 
 ### DTC snapshots
 
 Emitted on the first completed scan, when the code set changes, and when scan
 completeness changes — not on every poll. Details include per-module codes and a
-per-query outcome (`ok`, `empty`, `no_reply`, `rejected`, `malformed`), so
-"no codes" is never confused with "did not answer".
+per-query outcome (`ok`, `empty`, `no_reply`, `rejected`, `malformed`,
+`header_error`), so "no codes" is never confused with "did not answer".
+
+`header_error` means the adapter did not acknowledge the module header, so the
+query was **never sent**. That case is recorded rather than answered, because a
+reply without the intended header would come from whichever module was addressed
+last and would be attributed to the wrong ECU.
 
 ## Recording behaviour under failure
 

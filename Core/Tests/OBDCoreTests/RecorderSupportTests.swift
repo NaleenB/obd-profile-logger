@@ -118,6 +118,47 @@ final class DTCScannerTests: XCTestCase {
         XCTAssertEqual(scanner.outcomeDetails["ECM.stored"], "malformed")
     }
 
+    /// A header that the adapter refuses must abort the query, not fall through
+    /// to whichever module was addressed last.
+    func testHeaderFailureSkipsQueryAndIsRecorded() {
+        var scanner = DTCScanner(targets: [.init(module: "TCM", header: "7E1")])
+        var commands: [String] = []
+
+        while case .request(let request) = scanner.next() {
+            commands.append(request.command)
+            // Simulate ATSH7E1 not being acknowledged: no query is sent.
+            scanner.ingestHeaderFailure()
+        }
+
+        XCTAssertEqual(commands, ["0101", "03", "07", "0A"])
+        XCTAssertEqual(scanner.outcomeDetails["TCM.monitor"], "header_error")
+        XCTAssertEqual(scanner.outcomeDetails["TCM.stored"], "header_error")
+        XCTAssertFalse(scanner.diagnostics.isComplete)
+        XCTAssertEqual(scanner.diagnostics.codes(for: "TCM"), [])
+    }
+
+    /// A header failure for one module must not disturb the other module.
+    func testHeaderFailureIsPerModule() {
+        var scanner = DTCScanner()
+        var index = 0
+
+        while case .request(let request) = scanner.next() {
+            if request.header == "7E1" {
+                scanner.ingestHeaderFailure()
+            } else {
+                let replies = ["4101004C8000", "430301", "4700", "4A00"]
+                scanner.ingest(responseHex: index < replies.count ? replies[index] : nil)
+                index += 1
+            }
+        }
+
+        XCTAssertEqual(scanner.diagnostics.codes(for: "ECM"), ["P0301"])
+        XCTAssertEqual(scanner.diagnostics.codes(for: "TCM"), [])
+        XCTAssertEqual(scanner.diagnostics.modulesIncomplete, ["TCM"])
+        XCTAssertEqual(scanner.outcomeDetails["TCM.stored"], "header_error")
+        XCTAssertNotEqual(scanner.outcomeDetails["ECM.stored"], "header_error")
+    }
+
     func testPendingCodeIsReported() {
         let replies: [String?] = ["410100040000", "4300", "470047", "4A00"]
         let scanner = scan(targets: [.init(module: "ECM", header: "7E0")], replies: replies)

@@ -31,16 +31,19 @@ public final class RecordingSession {
 
     // MARK: - Lifecycle
 
+    /// Starts a session and writes exactly one `session_started` event.
+    /// Callers may add details; they must not emit a second start event.
     public func start(
         manifest: SessionManifest,
         root: URL? = nil,
-        clock: MonotonicClock = UptimeClock()
+        clock: MonotonicClock = UptimeClock(),
+        details: [String: String] = [:]
     ) throws {
         guard recorder == nil else { return }
         let created = try SessionStore.createSession(root: root, manifest: manifest, clock: clock)
-        try created.recordEvent(.sessionStarted, details: [
-            "profile": manifest.vehicleProfileID ?? "none"
-        ])
+        var startDetails = details
+        startDetails["profile"] = manifest.vehicleProfileID ?? "none"
+        try created.recordEvent(.sessionStarted, details: startDetails)
         recorder = created
         directory = created.directory
         lastFinalize = nil

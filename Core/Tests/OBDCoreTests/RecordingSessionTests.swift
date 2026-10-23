@@ -48,6 +48,25 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(events.first?["type"] as? String, "session_started")
     }
 
+    /// Exactly one start event, even when the caller supplies metadata.
+    func testStartWritesExactlyOneStartEvent() throws {
+        let session = RecordingSession()
+        try session.start(
+            manifest: manifest(),
+            root: root,
+            details: ["polledPIDs": "0C,0D"]
+        )
+
+        let directory = try XCTUnwrap(session.directory)
+        let events = try rows(directory, SessionRecorder.eventsFilename())
+        let starts = events.filter { $0["type"] as? String == "session_started" }
+        XCTAssertEqual(starts.count, 1)
+
+        let details = starts[0]["details"] as? [String: String]
+        XCTAssertEqual(details?["polledPIDs"], "0C,0D")
+        XCTAssertEqual(details?["profile"], "mitsubishi-outlander-2016-4n14")
+    }
+
     func testStandardSampleIsWritten() throws {
         let session = try started()
         XCTAssertTrue(session.sample(pid: 0x0C, name: "RPM", value: 650, unit: "rpm", raw: "410C0A28"))

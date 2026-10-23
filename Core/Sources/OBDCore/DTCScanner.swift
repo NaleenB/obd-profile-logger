@@ -43,6 +43,9 @@ public struct DTCScanner {
         case noReply = "no_reply"
         case rejected
         case malformed
+        /// The adapter refused or ignored the header selection, so the query was
+        /// never sent. Distinct from "no reply": nothing was asked.
+        case headerError = "header_error"
     }
 
     /// The modules this tool targets. ABS, SRS, AWD and body controllers do not
@@ -86,18 +89,52 @@ public struct DTCScanner {
         return .request(request)
     }
 
+    /// The adapter did not acknowledge the header selection. The query must not
+    /// be sent: without the intended header it would be answered by whichever
+    /// module was addressed last, and the result would be attributed to the
+    /// wrong ECU.
+    public mutating func ingestHeaderFailure() {
+        guard let request = pending else { return }
+        pending = nil
+        outcomes[key(for: request)] = .headerError
+        setCodes(nil, module: request.module, mode: mode(for: request))
+        advance()
+    }
+
+    private mutating func advance() {
+        queryIndex += 1
+        if queryIndex >= Self.queries.count {
+            queryIndex = 0
+            moduleIndex += 1
+        }
+    }
+
+    private func key(for request: Request) -> String {
+        let suffix: String
+        switch request.command {
+        case "0101": suffix = "monitor"
+        case "03": suffix = "stored"
+        case "07": suffix = "pending"
+        default: suffix = "permanent"
+        }
+        return "\(request.module).\(suffix)"
+    }
+
+    private func mode(for request: Request) -> String {
+        switch request.command {
+        case "03": return "stored"
+        case "07": return "pending"
+        case "0101": return "monitor"
+        default: return "permanent"
+        }
+    }
+
     /// Feed the raw payload for the request just returned. `nil` means no reply
     /// or a timeout.
     public mutating func ingest(responseHex: String?) {
         guard let request = pending else { return }
         pending = nil
-        defer {
-            queryIndex += 1
-            if queryIndex >= Self.queries.count {
-                queryIndex = 0
-                moduleIndex += 1
-            }
-        }
+        defer { advance() }
 
         switch request.command {
         case "0101":
