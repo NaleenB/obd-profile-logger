@@ -167,6 +167,11 @@ public enum VehicleSpec {
     /// as a resting measurement rather than a surface-charge artefact.
     public static let restingSettleMinutes: Int = 30
 
+    /// Cranking voltage. Below `crankMinimumHealthy` the battery is labouring;
+    /// below `crankMinimumFail` it is failing.
+    public static let crankMinimumHealthy: Double = 9.5
+    public static let crankMinimumFail: Double = 9.0
+
     /// Convert g/s from PID 0x10 into mg per cylinder per stroke.
     /// Four cylinders, four-stroke: intake events per second = rpm / 30.
     public static func airFlowMgPerCylinder(gramsPerSecond: Double, rpm: Double) -> Double? {
@@ -390,9 +395,10 @@ public enum HealthEvaluator {
     }
 
     public static func worst(_ findings: [Finding]) -> Severity {
+        if findings.isEmpty { return .insufficientData }
         if findings.contains(where: { $0.severity == .suspect }) { return .suspect }
         if findings.contains(where: { $0.severity == .watch }) { return .watch }
-        if findings.isEmpty { return .insufficientData }
+        if findings.allSatisfy({ $0.severity == .insufficientData }) { return .insufficientData }
         return .ok
     }
 }

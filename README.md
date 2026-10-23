@@ -43,6 +43,20 @@ Output lands in `Probe/results/<timestamp>/`:
 
 `--list`, `--replay` and `--self-test` need no car.
 
+## Battery measurement (default behaviour)
+
+Every normal probe run measures the battery across the start event. There is no
+flag for it:
+
+1. Turn the ignition on, then start the engine whenever you like.
+2. The probe samples control-module voltage at ~6 Hz and RPM every sixth pass.
+3. It detects the crank, captures the minimum voltage, times the recovery, and
+   reports charging voltage once running.
+
+Findings are graded against: crank minimum above 9.5 V (below 9.0 V = failing),
+charging 13.8-14.5 V running. A voltage read with the ignition on is never
+treated as a resting-battery diagnosis.
+
 ## Core usage
 
 ```bash

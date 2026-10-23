@@ -1,4 +1,5 @@
 import Foundation
+import OBDCore
 
 struct PIDProbe {
     let pid: UInt8
@@ -63,10 +64,12 @@ final class Probe {
         try await identifyAdapter()
         try await handshake()
 
+        var batteryReport: BatteryReport?
+
         if skipIgnition {
             notes.append("Ignition wait skipped by request; results are adapter-only.")
         } else {
-            _ = try await waitForECU(maxWait: ignitionWait)
+            batteryReport = try await awaitStart(maxWait: ignitionWait)
         }
 
         try await pinProtocol()
@@ -87,7 +90,7 @@ final class Probe {
         }
         try await sweepIdentifiers(service: sweepService, budget: mode22Seconds)
 
-        try writeOutputs()
+        try writeOutputs(battery: batteryReport)
     }
 
     // MARK: - Adapter identity
@@ -125,6 +128,111 @@ final class Probe {
     }
 
     // MARK: - Ignition gate
+
+    /// Waits for the driver to start the engine, measuring the battery across
+    /// the whole start event as it happens. This replaces the old "poll until
+    /// the ECU answers" gate: the start event *is* the gate, and the voltage
+    /// trace across it is the most useful battery test available over OBD.
+    private func awaitStart(maxWait: TimeInterval) async throws -> BatteryReport {
+        rule("Start-up and battery")
+
+        say("  Turn the ignition ON, then start the engine when you are ready.")
+        say("  Sampling voltage and RPM continuously — no need to time anything.")
+        say("")
+
+        let monitor = BatteryMonitor()
+        let began = Date()
+        var iteration = 0
+        var runningSince: Date?
+        var lastPrintedPhase: BatteryPhase = .unknown
+        var announcements: Set<BatteryPhase> = []
+
+        while Date().timeIntervalSince(began) < maxWait {
+            let elapsed = Int(Date().timeIntervalSince(began) * 1000)
+
+            // RPM is sampled every sixth pass so voltage keeps the resolution
+            // that matters during a crank.
+            var rpm: Double?
+            if iteration % 6 == 0 {
+                if let reply = try? await elm.send("010C", timeout: 2),
+                   let hex = reply.payloadHex, hex.hasPrefix("410C"),
+                   let bytes = bytesFromHex(String(hex.dropFirst(4))), bytes.count >= 2 {
+                    rpm = (Double(bytes[0]) * 256.0 + Double(bytes[1])) / 4.0
+                }
+            }
+
+            var volts: Double?
+            if let reply = try? await elm.send("0142", timeout: 2),
+               let hex = reply.payloadHex, hex.hasPrefix("4142"),
+               let bytes = bytesFromHex(String(hex.dropFirst(4))), bytes.count >= 2 {
+                volts = (Double(bytes[0]) * 256.0 + Double(bytes[1])) / 1000.0
+            }
+
+            if let volts {
+                monitor.ingest(VoltageSample(atMs: elapsed, volts: volts, rpm: rpm))
+            }
+
+            let phase = monitor.currentPhase
+
+            if phase != lastPrintedPhase {
+                switch phase {
+                case .ignitionOn:
+                    say("  [\(clockStamp())] ignition on, engine not turning")
+                case .cranking:
+                    say("  [\(clockStamp())] cranking detected — capturing minimum voltage")
+                case .running:
+                    say("  [\(clockStamp())] engine started")
+                case .unknown:
+                    break
+                }
+                lastPrintedPhase = phase
+            }
+
+            if phase == .running {
+                if runningSince == nil { runningSince = Date() }
+                if let since = runningSince, Date().timeIntervalSince(since) > 2.5 {
+                    break
+                }
+            }
+
+            if !announcements.contains(.ignitionOn), phase == .ignitionOn, iteration > 40,
+               monitor.latestVolts == nil {
+                say("  Waiting for the ECU to answer…")
+                announcements.insert(.ignitionOn)
+            }
+
+            iteration += 1
+        }
+
+        let report = monitor.report()
+
+        switch report.phaseReached {
+        case .running:
+            break
+        case .ignitionOn:
+            notes.append("No engine start was observed; the battery test is incomplete.")
+            say("  No start observed — continuing with the remaining checks.")
+        case .unknown, .cranking:
+            throw ProbeError.ignitionTimeout(Int(maxWait))
+        }
+
+        say("")
+        for finding in report.findings {
+            say("  \(badge(finding.severity)) \(finding.label): \(finding.message)")
+        }
+        say("")
+
+        return report
+    }
+
+    private func badge(_ severity: Severity) -> String {
+        switch severity {
+        case .ok: return "OK  "
+        case .watch: return "WATCH"
+        case .suspect: return "FAIL"
+        case .insufficientData: return "n/a "
+        }
+    }
 
     private func waitForECU(maxWait: TimeInterval) async throws -> ELMResponse {
         say("")
@@ -707,7 +815,7 @@ final class Probe {
 
     // MARK: - Output
 
-    private func writeOutputs() throws {
+    private func writeOutputs(battery: BatteryReport? = nil) throws {
         let supported = pidProbes.filter { $0.responded }
         let advertisedOnly = pidProbes.filter { !$0.responded }
 
@@ -747,6 +855,7 @@ final class Probe {
                 return entry
             },
             "dtcs": dtcs,
+            "battery": battery.map(batteryDictionary) ?? [:],
             "dieselHighlights": dieselHighlights,
             "notes": notes
         ]
@@ -754,7 +863,8 @@ final class Probe {
         try logger.writeJSON("probe.json", payload)
         try logger.write("report.txt", renderReport(dieselHighlights: dieselHighlights,
                                                      supported: supported,
-                                                     advertisedOnly: advertisedOnly))
+                                                     advertisedOnly: advertisedOnly,
+                                                     battery: battery))
         logger.close()
 
         rule("Done")
@@ -776,7 +886,8 @@ final class Probe {
     private func renderReport(
         dieselHighlights: [String],
         supported: [PIDProbe],
-        advertisedOnly: [PIDProbe]
+        advertisedOnly: [PIDProbe],
+        battery: BatteryReport?
     ) -> String {
         var lines: [String] = []
         let stamp = isoNow()
@@ -795,6 +906,22 @@ final class Probe {
         lines.append("VEHICLE")
         for key in vehicle.keys.sorted() where key != "supportedPIDBlocks" {
             lines.append("  \(key): \(vehicle[key] ?? "")")
+        }
+        lines.append("")
+        lines.append("BATTERY")
+        if let battery {
+            lines.append("  phase reached: \(battery.phaseReached.rawValue)")
+            lines.append("  samples: \(battery.sampleCount)")
+            if let v = battery.preCrankVolts { lines.append(String(format: "  before crank: %.1f V", v)) }
+            if let v = battery.crankMinimumVolts { lines.append(String(format: "  crank minimum: %.1f V", v)) }
+            if let v = battery.crankDurationMs { lines.append("  crank duration: \(v) ms") }
+            if let v = battery.runningVolts { lines.append(String(format: "  running: %.2f V", v)) }
+            if let v = battery.recoveryMs { lines.append("  recovery: \(v) ms") }
+            for finding in battery.findings {
+                lines.append("  [\(finding.severity.rawValue)] \(finding.label): \(finding.message)")
+            }
+        } else {
+            lines.append("  not measured this run")
         }
         lines.append("")
         lines.append("DIESEL-RELEVANT PIDs THAT RESPONDED")
@@ -826,6 +953,30 @@ final class Probe {
     }
 
     // MARK: - Formatting helpers
+
+    private func batteryDictionary(_ report: BatteryReport) -> [String: Any] {
+        var out: [String: Any] = [
+            "phaseReached": report.phaseReached.rawValue,
+            "sampleCount": report.sampleCount,
+            "verdict": report.verdict.rawValue,
+            "findings": report.findings.map { finding -> [String: Any] in
+                var entry: [String: Any] = [
+                    "key": finding.key,
+                    "label": finding.label,
+                    "severity": finding.severity.rawValue,
+                    "message": finding.message
+                ]
+                if let observed = finding.observed { entry["observed"] = observed }
+                return entry
+            }
+        ]
+        if let value = report.preCrankVolts { out["preCrankVolts"] = value }
+        if let value = report.crankMinimumVolts { out["crankMinimumVolts"] = value }
+        if let value = report.crankDurationMs { out["crankDurationMs"] = value }
+        if let value = report.runningVolts { out["runningVolts"] = value }
+        if let value = report.recoveryMs { out["recoveryMs"] = value }
+        return out
+    }
 
     private func pad(_ s: String, _ width: Int) -> String {
         if s.count >= width { return s }

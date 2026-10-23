@@ -24,7 +24,9 @@ The tool will:
 2. Connect and identify the serial characteristic.
 3. Read the BLE Device Information strings.
 4. Run the adapter handshake (`ATZ`, `ATE0`, `ATL0`, `ATS0`, `ATH0`).
-5. Print **TURN THE IGNITION ON NOW** and poll `0100` until the ECU answers.
+5. Print instructions to turn the ignition on and start the engine, then sample
+   voltage and RPM continuously. The crank is detected automatically and the
+   battery is graded as part of the run.
 6. Pin the protocol to `ATSP6` (CAN 11-bit / 500 kbps).
 7. Read VIN, calibration ID, CVN via mode 09.
 8. Walk the supported-PID bitmaps (`0100` … `01C0`).
