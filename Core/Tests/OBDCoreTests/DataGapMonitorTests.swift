@@ -32,21 +32,51 @@ final class DataGapMonitorTests: XCTestCase {
 
         let resumedAt = start.addingTimeInterval(100)
         let transition = monitor.update(now: resumedAt, lastSampleAt: resumedAt)
-        XCTAssertEqual(transition, .ended(gapSeconds: 100))
+        XCTAssertEqual(transition, .ended(gapSeconds: 100, reason: .resumed))
         XCTAssertFalse(monitor.isInGap)
     }
 
     func testFinishReportsAnOpenGap() {
         var monitor = DataGapMonitor(threshold: 10)
         _ = monitor.update(now: start.addingTimeInterval(30), lastSampleAt: start)
-        let transition = monitor.finish(now: start.addingTimeInterval(200))
-        XCTAssertEqual(transition, .ended(gapSeconds: 200))
+        let transition = monitor.finish(now: start.addingTimeInterval(200), reason: .recordingStopped)
+        XCTAssertEqual(transition, .ended(gapSeconds: 200, reason: .recordingStopped))
     }
 
     func testFinishWithNoGapDoesNothing() {
         var monitor = DataGapMonitor(threshold: 10)
         _ = monitor.update(now: start, lastSampleAt: start)
-        XCTAssertNil(monitor.finish(now: start.addingTimeInterval(1)))
+        XCTAssertNil(monitor.finish(now: start.addingTimeInterval(1), reason: .recordingStopped))
+    }
+
+    /// The reported defect: a link drop while the vehicle was already silent was
+    /// logged as `data_resumed`. The reason is now carried by the transition, so
+    /// only a real sample can produce `.resumed`.
+    func testLinkLossClosesTheGapWithoutClaimingResumption() {
+        var monitor = DataGapMonitor(threshold: 10)
+        XCTAssertEqual(monitor.update(now: start.addingTimeInterval(30), lastSampleAt: start),
+                       .started(quietFor: 30))
+
+        let closed = monitor.finish(now: start.addingTimeInterval(45), reason: .linkDown)
+        XCTAssertEqual(closed, .ended(gapSeconds: 45, reason: .linkDown))
+        XCTAssertFalse(monitor.isInGap)
+    }
+
+    /// A stall is also not a resumption.
+    func testStallClosesTheGapWithItsOwnReason() {
+        var monitor = DataGapMonitor(threshold: 10)
+        _ = monitor.update(now: start.addingTimeInterval(30), lastSampleAt: start)
+        XCTAssertEqual(monitor.finish(now: start.addingTimeInterval(70), reason: .stalled),
+                       .ended(gapSeconds: 70, reason: .stalled))
+    }
+
+    /// Only `update` observing a fresh sample may end a gap by resumption.
+    func testOnlyAnArrivingSampleIsAResumption() {
+        var monitor = DataGapMonitor(threshold: 10)
+        _ = monitor.update(now: start.addingTimeInterval(30), lastSampleAt: start)
+        let arrived = start.addingTimeInterval(40)
+        XCTAssertEqual(monitor.update(now: arrived, lastSampleAt: arrived),
+                       .ended(gapSeconds: 40, reason: .resumed))
     }
 
     func testNoLastSampleMeansNoJudgement() {
@@ -79,7 +109,7 @@ final class DataGapMonitorTests: XCTestCase {
         // The car answers again: the gap closes exactly once.
         let resumedAt = start.addingTimeInterval(303)
         let closed = monitor.update(now: resumedAt, lastSampleAt: resumedAt)
-        XCTAssertEqual(closed, .ended(gapSeconds: 303))
+        XCTAssertEqual(closed, .ended(gapSeconds: 303, reason: .resumed))
         XCTAssertNil(monitor.update(now: resumedAt, lastSampleAt: resumedAt))
     }
 }

@@ -107,6 +107,73 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertNil(written.finishedAt, "an unfinished session must not look finished")
     }
 
+    /// The start odometer arrives after the manifest was written, and must be
+    /// persisted immediately: soot per kilometre and the regeneration interval
+    /// are uncomputable from an end value alone.
+    func testStartOdometerIsPersistedWhenItArrives() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        // The ECU commonly answers only after the session has begun.
+        session.updateOdometer(start: 80_382)
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let whileOpen = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(whileOpen.odometerStartKm, 80_382)
+        XCTAssertNil(whileOpen.odometerEndKm)
+
+        session.updateOdometer(start: 80_382, end: 80_401)
+        session.stop(reason: "test")
+
+        let closedData = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let closed = try JSONDecoder().decode(SessionManifest.self, from: closedData)
+        XCTAssertEqual(closed.odometerStartKm, 80_382)
+        XCTAssertEqual(closed.odometerEndKm, 80_401)
+    }
+
+    /// A late manifest update must not resurrect a file without `finishedAt`,
+    /// and must not be applied to the in-memory copy the writer snapshotted.
+    func testUpdateAfterCloseCannotUndoFinalisation() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+        session.stop(reason: "test")
+
+        session.updateProfile(id: "generic-iso15765-can", hash: nil, match: "none")
+        session.updateOdometer(start: 1, end: 2)
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.vehicleProfileID, "mitsubishi-outlander-2016-4n14")
+        XCTAssertNil(written.odometerStartKm)
+        XCTAssertNotNil(written.finishedAt)
+    }
+
+    /// Updates and finalisation run from different queues in the app. Whatever
+    /// the interleaving, the file left behind must be one complete manifest that
+    /// records the close.
+    func testConcurrentUpdatesAndFinishLeaveACompleteManifest() throws {
+        for _ in 0..<20 {
+            let session = try started()
+            let directory = try XCTUnwrap(session.directory)
+
+            let group = DispatchGroup()
+            DispatchQueue.global().async(group: group) {
+                for index in 0..<50 {
+                    session.updateOdometer(start: index, end: index)
+                }
+            }
+            DispatchQueue.global().async(group: group) {
+                _ = session.stop(reason: "race")
+            }
+            XCTAssertEqual(group.wait(timeout: .now() + 10), .success)
+
+            let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+            let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+            XCTAssertNotNil(written.finishedAt, "the close must survive a concurrent update")
+            XCTAssertTrue(written.notes.contains { $0.hasPrefix("sampleCount=") })
+        }
+    }
+
     /// Exactly one start event, even when the caller supplies metadata.
     func testStartWritesExactlyOneStartEvent() throws {
         let session = RecordingSession()

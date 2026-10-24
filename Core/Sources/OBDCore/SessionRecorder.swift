@@ -171,14 +171,28 @@ public final class SessionRecorder {
         try? sampleHandle.close()
         try? eventHandle.close()
 
+        // The final manifest must be built and snapshotted under the same lock
+        // that guards `updateManifest`, or a concurrent update could write a
+        // file without `finishedAt` after this one, or interleave a half-applied
+        // change into it. `closed` is already true, so any update that acquires
+        // the lock from here on returns without writing.
+        lock.lock()
         manifest.finishedAt = WallClock.iso()
         manifest.notes.append("sampleCount=\(samples)")
         manifest.notes.append("eventCount=\(events)")
-        do {
-            let data = try JSONEncoder.pretty.encode(manifest)
-            try data.write(to: directory.appendingPathComponent(Self.manifestFilename()))
-        } catch {
-            problems.append("manifest: \(error)")
+        let manifestData = try? JSONEncoder.pretty.encode(manifest)
+        lock.unlock()
+
+        if let manifestData {
+            do {
+                try manifestData.write(
+                    to: directory.appendingPathComponent(Self.manifestFilename()),
+                    options: .atomic)
+            } catch {
+                problems.append("manifest: \(error)")
+            }
+        } else {
+            problems.append("manifest: could not be encoded")
         }
 
         return problems.isEmpty ? .completed : .incomplete(problems.joined(separator: "; "))
@@ -196,8 +210,11 @@ public final class SessionRecorder {
     public func updateManifest(_ change: (inout SessionManifest) -> Void) {
         lock.lock()
         defer { lock.unlock() }
-        change(&manifest)
+        // Checked before mutating: a closed session has already written its
+        // final manifest, and a late change must not touch the in-memory copy
+        // the writer used.
         guard !closed else { return }
+        change(&manifest)
         // Best effort: a manifest that cannot be written is already reported by
         // `finish`, and losing the recording over it would be worse.
         try? JSONEncoder.pretty

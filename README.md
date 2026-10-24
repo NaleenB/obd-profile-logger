@@ -180,9 +180,10 @@ simulated.
 | Cranking | 10.38–10.90 V against a 9.5 V health line |
 
 **Verified on hardware:** both platforms. The iOS build has recorded real sessions
-on a physical iPhone, including background recording with the screen locked. Two
-timing behaviours remain unobserved in a real session: the ten-minute idle
-disconnect, and the ten-minute reconnect window after a dropped link. See the roadmap in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+on a physical iPhone, including background recording with the screen locked. Some
+behaviours remain unobserved in a real session — the ten-minute idle disconnect,
+the ten-minute reconnect window after a dropped link, and the quiet polling mode
+that takes over once the car stops answering. See the roadmap in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Scope and disclaimer
 

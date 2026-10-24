@@ -68,6 +68,10 @@ final class LiveModel {
     private var identity = VehicleIdentity()
     private var identityResolved = false
     private var odometerKm: Int?
+    /// The session's starting odometer. Kept apart from `odometerKm` because the
+    /// first successful read often arrives after recording has started: the
+    /// engine must be identified before the ECU answers service 0x21 at all.
+    private var odometerStartKm: Int?
     private var lastOdometerRead = Date.distantPast
     private var ambientTempC: Double?
     private var profileURL: URL?
@@ -345,6 +349,10 @@ final class LiveModel {
         let previous = profileID
         loadProfile(id: id)
         profileMatchMethod = resolution.method.rawValue
+        // Service 0x21 only answers once the car is identified, so this is the
+        // moment the odometer first becomes readable. Ask on the next cycle
+        // rather than waiting out the periodic interval.
+        lastOdometerRead = .distantPast
         profileIndex = 0
         sweep = SweepAccountant()
         readings.clearManufacturer()
@@ -598,31 +606,22 @@ final class LiveModel {
             let started = Date()
             connectStartedAt = started
             do {
+                let startBegan = Date()
                 try await transport.start()
-                let bluetoothMs = Date().timeIntervalSince(started) * 1000
+                let startMs = Date().timeIntervalSince(startBegan) * 1000
 
                 // The adapter that worked last time is connected directly; a
                 // scan is the fallback, not the default.
-                var candidate = try await transport.findAdapter(scanSeconds: 8, nameFilter: nil)
-                let adapterMs = Date().timeIntervalSince(started) * 1000
-                status = "Connecting to \(candidate.name.isEmpty ? "adapter" : candidate.name)…"
-
-                var port: SerialPort
-                do {
-                    port = try await transport.connect(candidate)
-                } catch {
-                    // A remembered peripheral can go stale; rescan once.
-                    candidate = try await transport.findAdapter(
-                        scanSeconds: 6, nameFilter: nil, preferKnown: false)
-                    port = try await transport.connect(candidate)
-                }
-                _ = port
+                status = "Scanning for adapter…"
+                let link = try await connectAdapter(scanSeconds: 8)
+                let candidate = link.candidate
+                status = "Configuring adapter…"
                 KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
-                let bleMs = Date().timeIntervalSince(started) * 1000
 
                 let client = ELMClient(transport: transport, logger: nil)
                 elm = client
                 adapterName = candidate.name.isEmpty ? "OBD adapter" : candidate.name
+                let elmBegan = Date()
 
                 _ = try? await client.send("ATE0", timeout: 2)
                 _ = try? await client.send("ATL0", timeout: 2)
@@ -640,7 +639,7 @@ final class LiveModel {
                 } else {
                     _ = try? await client.send("ATSP0", timeout: 3)
                 }
-                let elmMs = Date().timeIntervalSince(started) * 1000
+                let elmMs = Date().timeIntervalSince(elmBegan) * 1000
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
                 identity = VehicleIdentity()
@@ -654,7 +653,7 @@ final class LiveModel {
 
                 let discoveryStarted = Date()
                 await discoverCapabilities(using: client)
-                let discoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
+                let capabilityDiscoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
                 rebuildSignalList()
 
                 lastVolts = nil
@@ -684,17 +683,22 @@ final class LiveModel {
                 // anything.
                 odometerKm = await readOdometer(using: client)
                 ambientTempC = await readAmbient(using: client)
+                odometerStartKm = odometerKm
 
                 // Recording is automatic: connecting is the intent to record.
                 startRecording()
                 session.event(.adapterConnected, ["adapter": adapterName])
+                // Every field here is a stage duration, so a reader never has to
+                // subtract milestones to find the slow one. `totalMs` is the
+                // exception, and says so by name.
                 session.event(.startupTiming, [
                     "phase": "connected",
-                    "bluetoothMs": Self.millis(bluetoothMs),
-                    "adapterMs": Self.millis(adapterMs),
-                    "bleMs": Self.millis(bleMs),
-                    "elmMs": Self.millis(elmMs),
-                    "discoveryMs": Self.millis(discoveryMs),
+                    "startMs": Self.millis(startMs),
+                    "adapterDiscoveryMs": Self.millis(link.discoveryMs),
+                    "adapterConnectMs": Self.millis(link.connectMs),
+                    "adapterRescanned": link.rescanned ? "true" : "false",
+                    "elmInitMs": Self.millis(elmMs),
+                    "capabilityDiscoveryMs": Self.millis(capabilityDiscoveryMs),
                     "totalMs": Self.millis(Date().timeIntervalSince(started) * 1000)
                 ].merging(manufacturerProbeTimings) { current, _ in current })
                 startPolling()
@@ -712,6 +716,9 @@ final class LiveModel {
 
         pollTask?.cancel()
         pollTask = nil
+        // The scan in progress belongs to the link that just died; resuming it
+        // after reconnection would mix two connections into one result.
+        scanner = nil
         transport.shutdown()
         elm = nil
         readings.clear()
@@ -723,7 +730,9 @@ final class LiveModel {
         supplyVolts = nil
 
         session.event(.adapterDisconnected, ["reason": reason])
-        reportGapTransition(gapMonitor.finish(now: Date()))
+        // Not a resumption: the vehicle may never have answered. The gap is
+        // closed with the reason it actually ended for.
+        reportGapTransition(gapMonitor.finish(now: Date(), reason: .linkDown))
 
         // The link dropping is usually distance, not a decision. Keep the
         // session open and try to pick it back up.
@@ -732,6 +741,54 @@ final class LiveModel {
         } else {
             phase = .failed("Adapter disconnected: \(reason)")
             status = "Adapter disconnected"
+        }
+    }
+
+    /// An adapter that is connected, with the stages that got there.
+    private struct AdapterConnection {
+        let candidate: BLETransport.Candidate
+        /// Finding it: a direct retrieval of the remembered adapter, or a scan.
+        let discoveryMs: Double
+        /// Connecting: services, characteristics, notification subscription.
+        let connectMs: Double
+        /// True when the remembered adapter failed and a scan was needed.
+        let rescanned: Bool
+    }
+
+    /// Connect to the remembered adapter, and scan if that does not work.
+    ///
+    /// A saved peripheral can go stale — CoreBluetooth may hold a dead
+    /// reference after an adapter reset, or the identifier may change. Both the
+    /// first connection and automatic reconnection go through here so recovery
+    /// cannot be weaker than the manual path.
+    private func connectAdapter(scanSeconds: TimeInterval) async throws -> AdapterConnection {
+        let discoveredAt = Date()
+        let remembered = try await transport.findAdapter(scanSeconds: scanSeconds, nameFilter: nil)
+        let discoveryMs = Date().timeIntervalSince(discoveredAt) * 1000
+
+        let connectStarted = Date()
+        do {
+            _ = try await transport.connect(remembered)
+            return AdapterConnection(
+                candidate: remembered,
+                discoveryMs: discoveryMs,
+                connectMs: Date().timeIntervalSince(connectStarted) * 1000,
+                rescanned: false
+            )
+        } catch {
+            let rescanStarted = Date()
+            let fresh = try await transport.findAdapter(
+                scanSeconds: scanSeconds, nameFilter: nil, preferKnown: false)
+            let rescanMs = Date().timeIntervalSince(rescanStarted) * 1000
+
+            let retryStarted = Date()
+            _ = try await transport.connect(fresh)
+            return AdapterConnection(
+                candidate: fresh,
+                discoveryMs: discoveryMs + rescanMs,
+                connectMs: Date().timeIntervalSince(retryStarted) * 1000,
+                rescanned: true
+            )
         }
     }
 
@@ -756,9 +813,12 @@ final class LiveModel {
 
                 do {
                     try await self.transport.start()
-                    let candidate = try await self.transport.findAdapter(scanSeconds: 6, nameFilter: nil)
-                    let port = try await self.transport.connect(candidate)
-                    _ = port
+                    // The same direct-then-rescan path as the first connection.
+                    // A remembered peripheral that has gone stale must not be
+                    // retried for ten minutes while the dongle sits there
+                    // advertising under a new identity.
+                    let link = try await self.connectAdapter(scanSeconds: 6)
+                    let candidate = link.candidate
 
                     let client = ELMClient(transport: self.transport, logger: nil)
                     _ = try? await client.send("ATE0", timeout: 2)
@@ -774,7 +834,10 @@ final class LiveModel {
                     self.status = "Connected"
                     self.session.event(.adapterReconnected, [
                         "attempt": String(attempt),
-                        "adapter": candidate.name
+                        "adapter": candidate.name,
+                        "adapterDiscoveryMs": Self.millis(link.discoveryMs),
+                        "adapterConnectMs": Self.millis(link.connectMs),
+                        "adapterRescanned": link.rescanned ? "true" : "false"
                     ])
                     self.gapMonitor = DataGapMonitor(threshold: 10)
                     self.startPolling()
@@ -813,7 +876,7 @@ final class LiveModel {
 
         session.event(.adapterDisconnected, ["reason": reason.rawValue])
         if isRecording {
-            reportGapTransition(gapMonitor.finish(now: Date()))
+            reportGapTransition(gapMonitor.finish(now: Date(), reason: .recordingStopped))
             stopRecording(reason: reason.rawValue)
         }
         connectedAt = nil
@@ -852,7 +915,7 @@ final class LiveModel {
             profileMatch: profileMatchMethod,
             profileHash: profileHash,
             timezoneOffsetSeconds: TimeZone.current.secondsFromGMT(),
-            odometerStartKm: odometerKm,
+            odometerStartKm: odometerStartKm ?? odometerKm,
             ambientTempC: ambientTempC,
             coldSoakHours: soak,
             notes: [
@@ -885,7 +948,7 @@ final class LiveModel {
             recording = .idle
             return
         }
-        reportGapTransition(gapMonitor.finish(now: Date()))
+        reportGapTransition(gapMonitor.finish(now: Date(), reason: .recordingStopped))
         if case .ended(let duration, let peak)? = regenDetector.finish(at: Date()) {
             session.event(.regenEnded, [
                 "durationSeconds": String(Int(duration)),
@@ -921,7 +984,7 @@ final class LiveModel {
             let reason = profileReason.isEmpty ? "the vehicle could not be identified" : profileReason
             session.appendNote("No vehicle profile applied: \(reason)")
         }
-        session.updateOdometer(end: odometerKm)
+        session.updateOdometer(start: odometerStartKm, end: odometerKm)
         let result = session.stop(reason: reason)
         lastSessionEnd = Date()
         UserDefaults.standard.set(lastSessionEnd, forKey: "lastSessionEnd")
@@ -951,7 +1014,7 @@ final class LiveModel {
     /// Called when the app is about to terminate, so a session is not left open.
     func prepareForTermination() {
         guard isRecording else { return }
-        reportGapTransition(gapMonitor.finish(now: Date()))
+        reportGapTransition(gapMonitor.finish(now: Date(), reason: .recordingStopped))
         stopRecording(reason: "app_quit")
     }
 
@@ -1023,8 +1086,18 @@ final class LiveModel {
         switch transition {
         case .started(let quietFor):
             session.event(.dataGap, ["quietSeconds": String(Int(quietFor))])
-        case .ended(let gapSeconds):
-            session.event(.dataResumed, ["gapSeconds": String(Int(gapSeconds))])
+        case .ended(let gapSeconds, let reason):
+            // Only a sample arriving may be called a resumption. A link drop, a
+            // stall or a stop close the same gap but say something different
+            // about why data stopped.
+            if reason == .resumed {
+                session.event(.dataResumed, ["gapSeconds": String(Int(gapSeconds))])
+            } else {
+                session.event(.dataGapEnded, [
+                    "gapSeconds": String(Int(gapSeconds)),
+                    "reason": reason.rawValue
+                ])
+            }
         }
     }
 
@@ -1108,6 +1181,10 @@ final class LiveModel {
         stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
+        reportGapTransition(gapMonitor.finish(now: Date(), reason: .stalled))
+        // A half-finished scan belongs to the connection that died. Carrying it
+        // across the reconnect would assemble one result from two buses.
+        scanner = nil
         transport.shutdown()
         elm = nil
         lastLoopTick = nil
@@ -1253,9 +1330,16 @@ final class LiveModel {
 
         if isRecording,
            Date().timeIntervalSince(lastOdometerRead) > 60 {
-            lastOdometerRead = Date()
+            // Only a successful read resets the clock. Stamping the attempt
+            // regardless meant a cold ECU that answered a moment later was not
+            // read again for a minute, and the start odometer could be lost for
+            // the whole session.
             if let reading = await readOdometer(using: elm) {
-                odometerKm = reading
+                lastOdometerRead = Date()
+                recordOdometer(reading)
+            } else if Date().timeIntervalSince(lastOdometerRead) > 300 {
+                // A car that never answers stops being asked every cycle.
+                lastOdometerRead = Date()
             }
         }
 
@@ -1377,12 +1461,17 @@ final class LiveModel {
             // anyway could get an answer from the wrong module and attribute it
             // to this one.
             let headerReply = try? await elm.send("ATSH" + request.header, timeout: 2)
+            // Cancellation during the wait means the link is gone and the scan
+            // is being abandoned. Committing the step anyway would leave a
+            // partial result to be resumed after reconnection.
+            if Task.isCancelled { return }
             guard headerReply?.isOK == true else {
                 active.ingestHeaderFailure()
                 scanner = active
                 return
             }
             let reply = try? await elm.send(request.command, timeout: 3)
+            if Task.isCancelled { return }
             active.ingest(responseHex: reply?.payloadHex)
             scanner = active
         }
@@ -1551,6 +1640,17 @@ final class LiveModel {
         return profile.decode(frame)
             .first { $0.itemNumber == 145 }
             .map { Int($0.value) }
+    }
+
+    /// Records an odometer reading and, the first time one arrives, writes it
+    /// to the manifest as the session's start. Soot per kilometre and the
+    /// regeneration interval both need a start value, and they are useless with
+    /// an end value alone.
+    private func recordOdometer(_ reading: Int) {
+        odometerKm = reading
+        guard isRecording, odometerStartKm == nil else { return }
+        odometerStartKm = reading
+        session.updateOdometer(start: reading)
     }
 
     /// Intake air temperature with the engine off, as an ambient proxy: this ECU

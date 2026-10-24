@@ -176,6 +176,7 @@ public enum SessionEventType: String, Codable {
     case tripSnapshot = "trip_snapshot"
     case dataGap = "data_gap"
     case dataResumed = "data_resumed"
+    case dataGapEnded = "data_gap_ended"
     case appLifecycle = "app_lifecycle"
     case batteryTest = "battery_test"
     case dtcSnapshot = "dtc_snapshot"

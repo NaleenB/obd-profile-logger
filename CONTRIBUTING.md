@@ -67,10 +67,12 @@ Planned, in rough order. Nothing here is committed to a date.
 | ~~Session history~~ | done — sessions list, per-session export, share-all, delete |
 | ~~Profile-driven standard PIDs~~ | done — both shipped profiles define their own signal list and scaling |
 | ~~Profile picker~~ | done — then removed: identification is automatic and there is no picker |
+| ~~Background recording~~ | done — verified on the iPhone with the screen locked |
+| ~~CI~~ | done — Core tests, Probe self-test and both app builds on every push |
+| Quiet mode on hardware | the loop degrades once the car stops answering; not yet watched going quiet and waking again |
+| Stale-peripheral recovery | the rescan fallback is shared by connect and reconnect; not yet induced on a phone |
 | Baseline learning | compare a drive against the car's own normal, not just factory limits |
-| Background recording | keep a session running with the phone locked |
 | More vehicle profiles | the whole point — `profiles/generic/iso15765-can.json` is the template |
-| CI | `swift test` plus app builds on a macOS runner |
 
 ## Not in scope
 

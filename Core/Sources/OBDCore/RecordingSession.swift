@@ -52,10 +52,19 @@ public final class RecordingSession {
         state = .recording(sessionID: created.sessionID)
     }
 
-    /// Odometer is only known at the end of a session; record it before closing.
-    public func updateOdometer(end: Int?) {
-        guard let end, let recorder else { return }
-        recorder.updateManifest { $0.odometerEndKm = end }
+    /// Odometer read at the start and at the end of a session.
+    ///
+    /// The start reading is written as soon as it is obtained, not at close:
+    /// with a cold ECU it only answers once the car has been identified and
+    /// woken, which can be long after the manifest was first written. Soot per
+    /// kilometre and the regeneration interval both need it, and they are
+    /// useless with only an end value.
+    public func updateOdometer(start: Int? = nil, end: Int? = nil) {
+        guard let recorder else { return }
+        recorder.updateManifest {
+            if let start { $0.odometerStartKm = start }
+            if let end { $0.odometerEndKm = end }
+        }
     }
 
     /// Discovery can fail at connect, while the ECU is still asleep, and succeed

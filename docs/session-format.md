@@ -46,7 +46,7 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 | `profileMatch` | `calibration`, `vin`, `agreement`, `none`, or `override` (development only) — written at stop |
 | `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
-| `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval |
+| `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval. The start value is written as soon as it is read, which is usually after recording starts because service `0x21` only answers once the car is identified |
 | `ambientTempC` | intake air temperature before the engine started, used as an ambient proxy |
 | `coldSoakHours` | hours since the previous session ended, when known |
 | `notes` | free-form, including what the recording did **not** cover |
@@ -108,21 +108,36 @@ NTP, user change) cannot make session time go backwards.
 
 Types: `session_started`, `session_stopped`, `adapter_connected`,
 `adapter_disconnected`, `adapter_reconnected`, `recording_interrupted`,
-`battery_test`, `data_gap`, `data_resumed`, `regen_started`, `regen_ended`,
+`battery_test`, `data_gap`, `data_resumed`, `data_gap_ended`,
+`regen_started`, `regen_ended`,
 `sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `profile_changed`,
 `profile_disagreement`, `startup_timing`, `app_lifecycle`, `error`.
 
-`startup_timing` records where connection time went: Bluetooth ready, adapter
-discovery (or direct retrieval of the known adapter), BLE setup, ELM
-initialisation, capability discovery, and — in a second event — the time from
-starting the connection to the first live sample. It exists because "the phone
-connects slowly" is otherwise unfalsifiable.
+`startup_timing` records where connection time went. It exists because "the
+phone connects slowly" is otherwise unfalsifiable.
 
-The `connected` event also carries the probe of manufacturer service `0x21`,
-split by command: `selectHeaderMs`, `mutReplyMs`, `restoreHeaderMs` and
-`probeTotalMs`. Two header commands costing seconds rather than milliseconds is
-the signature of an adapter still busy with an earlier reply, which is a
-different problem from a slow car and is invisible in a single total.
+Every field is a **stage duration**, so no subtraction is needed to find the slow
+one; only `totalMs` is cumulative.
+
+| Field | Stage |
+|---|---|
+| `startMs` | Bluetooth power-on and manager start |
+| `adapterDiscoveryMs` | retrieving the remembered adapter, or scanning for one |
+| `adapterConnectMs` | connecting, discovering services, subscribing |
+| `adapterRescanned` | `true` when the remembered adapter failed and a scan was needed |
+| `elmInitMs` | `ATE0`/`ATL0`/`ATS0`/`ATH0` and the protocol choice |
+| `selectHeaderMs`, `mutReplyMs`, `restoreHeaderMs` | the manufacturer probe of service `0x21`, split by command |
+| `probeTotalMs` | that probe in total |
+| `capabilityDiscoveryMs` | asking which standard PIDs are supported |
+| `totalMs` | connection start to recording started |
+
+Two header commands costing seconds rather than milliseconds is the signature of
+an adapter still busy with an earlier reply, which is a different problem from a
+slow car and is invisible in a single total.
+
+A second `startup_timing` event with `phase: first_sample` records
+`sinceConnectMs`: connection start to the first live sample. That is the number a
+driver feels.
 
 `profile_changed` marks the boundary where a vehicle profile was applied. The app
 starts on generic OBD and may identify the car while recording, once the ECU wakes
@@ -140,6 +155,14 @@ wrong byte offset can be found without re-driving the car.
 answering while recording continued — usually ignition off. The adapter stays
 connected in that case, because OBD pin 16 is permanent battery power and the
 dongle never loses power; only the ECU sleeps.
+
+A gap ends for exactly one of two reasons, and they are different events.
+`data_resumed` means a sample from the vehicle arrived. `data_gap_ended` means
+the gap closed for any other reason, and carries `reason`: `link_down` (the
+Bluetooth link dropped), `stalled` (the polling loop was reset) or
+`recording_stopped`. A gap that spans a disconnect therefore never reports a
+resumption that did not happen — which matters because these events are what a
+silent log is diagnosed with.
 
 While a gap is open the app stops asking the full signal list — every request
 would go unanswered — and instead reads the adapter's own supply voltage (`ATRV`,
@@ -168,8 +191,11 @@ figure before and after where available. A regeneration still running when the
 session ends is closed with `truncated: true` rather than dropped.
 
 When the link drops during a recording, the session is **not** closed. The app
-records `adapter_disconnected`, then `data_gap`, and retries the connection for up
-to ten minutes with backoff. On success it writes `adapter_reconnected` and
+records `adapter_disconnected`, closes any open gap with `data_gap_ended` and
+`reason: link_down`, and retries the connection for up to ten minutes with
+backoff. Reconnection uses the same remembered-adapter-first, rescan-on-failure
+path as the first connection (`adapter_rescanned` in `adapter_reconnected`), so a
+peripheral that has gone stale cannot block recovery. On success it writes `adapter_reconnected` and
 continues the same session, so a walk out of range and back produces one file
 rather than two. If the ten minutes expire the session is stopped with reason
 `reconnect_timeout`.

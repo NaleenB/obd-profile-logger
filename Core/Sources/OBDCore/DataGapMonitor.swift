@@ -6,11 +6,16 @@ import Foundation
 /// This matters for analysis: a silent period must be visible in the event
 /// stream, otherwise the log looks like the engine simply did nothing for two
 /// minutes. Ignition-off is the common cause, and it is not a fault.
+///
+/// A gap must also be closed for the right reason. "The car answered again" and
+/// "the Bluetooth link dropped" are different events, and the second one must
+/// never be recorded as the first: the log is used to work out why data stopped,
+/// so a resumption that never happened makes it actively misleading.
 public struct DataGapMonitor {
 
     public enum Transition: Equatable {
         case started(quietFor: TimeInterval)
-        case ended(gapSeconds: TimeInterval)
+        case ended(gapSeconds: TimeInterval, reason: GapEndReason)
     }
 
     /// How long without a successful read before a gap is declared.
@@ -40,7 +45,8 @@ public struct DataGapMonitor {
             inGap = false
             let duration = gapStartedAt.map { now.timeIntervalSince($0) } ?? quietFor
             gapStartedAt = nil
-            return .ended(gapSeconds: duration)
+            // Data arrived: the only closure that may be called a resumption.
+            return .ended(gapSeconds: duration, reason: .resumed)
         }
 
         return nil
@@ -48,13 +54,27 @@ public struct DataGapMonitor {
 
     public var isInGap: Bool { inGap }
 
-    /// Called when recording stops: a still-open gap should be reported rather
-    /// than silently closing.
-    public mutating func finish(now: Date) -> Transition? {
+    /// Called when recording stops or the link goes away: a still-open gap
+    /// should be reported rather than silently closed, and the caller has to say
+    /// why it ended.
+    public mutating func finish(now: Date, reason: GapEndReason) -> Transition? {
         guard inGap else { return nil }
         inGap = false
         let duration = gapStartedAt.map { now.timeIntervalSince($0) } ?? 0
         gapStartedAt = nil
-        return .ended(gapSeconds: duration)
+        return .ended(gapSeconds: duration, reason: reason)
     }
+}
+
+/// Why a data gap closed.
+public enum GapEndReason: String, Equatable {
+    /// A sample from the vehicle arrived. The only genuine resumption.
+    case resumed
+    /// The Bluetooth link dropped. The vehicle may or may not have been
+    /// answering; nothing was recorded either way.
+    case linkDown = "link_down"
+    /// The polling loop stopped making progress and was reset.
+    case stalled
+    /// Recording ended while the gap was still open.
+    case recordingStopped = "recording_stopped"
 }

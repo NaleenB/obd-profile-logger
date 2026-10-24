@@ -347,7 +347,8 @@ final class ManifestProvenanceTests: XCTestCase {
         XCTAssertEqual(decoded.coldSoakHours, 14.25)
     }
 
-    /// Odometer is only known at stop, so it must be updatable mid-session.
+    /// The end odometer is only known at stop, so it must be updatable
+    /// mid-session.
     func testOdometerCanBeSetBeforeFinish() throws {
         let session = RecordingSession()
         let manifest = SessionManifest(sessionID: "s3", startedAt: WallClock.iso(), appVersion: "t")

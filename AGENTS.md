@@ -191,7 +191,10 @@ Each of these has already caused a wrong conclusion.
 - **A cold start used to spend ~28 s before the first sample**, because the DPF
   read and trip snapshot ran before polling. They now wait for the first
   successful sample. If startup is slow again, check `startup_timing` events
-  before guessing: a slow scan and a slow ECU look identical without them.
+  before guessing: a slow scan and a slow ECU look identical without them. Every
+  field there is a stage duration except `totalMs`; the manufacturer probe is
+  split by command because two header commands costing seconds means a busy
+  adapter, not a slow car.
 - **One battery report per engine cycle, not per connection.** The monitor resets
   after the engine has been stopped for five seconds, so a restart in the same
   connection is measured again.
@@ -216,6 +219,17 @@ Each of these has already caused a wrong conclusion.
 - **The TCM stops answering within a second or two of the engine stopping**, well
   before the ECM does. DTC scans after shutdown are honestly `incomplete` — that
   is the car, not a lost scan. Scan while the engine is running.
+- **A data gap ends for a reason, and only one of them is a resumption.** A link
+  drop while the car was already silent used to be written as `data_resumed`,
+  which made the log claim data that never arrived. `data_resumed` now requires a
+  sample; anything else is `data_gap_ended` with a `reason`.
+- **A scan and a connection are one unit.** The scanner is dropped on a link
+  loss or a stall, and a cancelled poll task does not commit a step it was
+  waiting on. Keeping either would stitch two connections into one DTC result.
+- **The start odometer is written when it is read, not at close.** Service `0x21`
+  does not answer until the car is identified, so it typically arrives after
+  recording starts; without it there is no soot-per-km or regen interval. A
+  failed read does not restart the 60 s timer, so a cold ECU is retried promptly.
 
 ## Status — what is proven
 
@@ -224,9 +238,11 @@ learning, rail pressure, turbo boost, DTC scanning on both ECUs, battery test, Z
 export, locked-screen background recording on the iPhone.
 
 Not yet observed: the 10-minute idle disconnect, the 10-minute reconnect window,
-regeneration detection against a real regeneration, and quiet mode past its entry
+regeneration detection against a real regeneration, quiet mode past its entry
 (silence is announced and the loop degrades as designed, but the car has not yet
-been watched waking back out of it).
+been watched waking back out of it), and the reconnect fallback on a stale
+peripheral — that path was duplicated from the manual connect, not induced on the
+phone.
 
 ## Conventions
 
