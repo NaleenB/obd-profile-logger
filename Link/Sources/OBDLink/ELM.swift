@@ -115,6 +115,22 @@ public struct ELMResponse {
         return Array(bytes[2...])
     }
 
+    /// Supply voltage reported by `ATRV`, e.g. `"12.4V"`.
+    ///
+    /// The adapter reads this from the OBD port itself, so it is available even
+    /// when the ECU is asleep — which is exactly when a live voltage is worth
+    /// showing, and when no PID will answer.
+    public var supplyVolts: Double? {
+        for line in lines.reversed() {
+            var text = line.trimmingCharacters(in: .whitespaces).uppercased()
+            if text.hasSuffix("V") { text.removeLast() }
+            // A car's electrical system is nowhere near these bounds; anything
+            // outside them is a misparsed reply rather than a reading.
+            if let volts = Double(text), volts > 5, volts < 30 { return volts }
+        }
+        return nil
+    }
+
     /// True when more than one module answered the request.
     public var hasMultipleFrames: Bool { payloadFrames.count > 1 }
 

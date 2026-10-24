@@ -86,6 +86,11 @@ final class LiveModel {
     private var stallWatchdog: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var connectedAt: Date?
+    /// Decides when silence becomes a message and when it becomes a cheaper loop.
+    private let silence = SilenceWatchdog()
+    /// Voltage at the adapter, readable with the ignition off. Only meaningful
+    /// as a fallback: while the ECU answers, PID `42` is the real measurement.
+    private(set) var supplyVolts: Double?
 
     private var scanner: DTCScanner?
     private var snapshotGate = DTCSnapshotGate()
@@ -684,6 +689,7 @@ final class LiveModel {
         lastVolts = nil
         batteryLogged = false
         runningSince = nil
+        supplyVolts = nil
 
         session.event(.adapterDisconnected, ["reason": reason])
         reportGapTransition(gapMonitor.finish(now: Date()))
@@ -788,6 +794,7 @@ final class LiveModel {
         readings.clear()
         dpf = nil
         scanner = nil
+        supplyVolts = nil
     }
 
     // MARK: - Recording
@@ -1089,6 +1096,50 @@ final class LiveModel {
         checkForStall()
     }
 
+    /// A UI phase, kept free of SwiftUI so this file stays a model.
+    enum AppPhase: String {
+        case active
+        case inactive
+        case background
+    }
+
+    /// Recorded in the session so a later report of "it froze" can be checked
+    /// against the file instead of needing the phone's system log.
+    func appDidChangePhase(_ phase: AppPhase, now: Date = Date()) {
+        guard isRecording else { return }
+        var details = ["phase": phase.rawValue]
+        if let last = lastUpdate {
+            details["quietSeconds"] = String(Int(now.timeIntervalSince(last).rounded()))
+        }
+        session.event(.appLifecycle, details)
+    }
+
+    // MARK: - Silence
+
+    /// True while the car — not the adapter — has stopped answering.
+    func isVehicleSilent(now: Date = Date()) -> Bool {
+        guard isConnected else { return false }
+        return silence.isNoticeable(now: now, reference: lastUpdate ?? connectedAt)
+    }
+
+    /// One line for the header, or nil while the car is answering.
+    ///
+    /// The values on screen are the last ones the car gave us. Saying so is the
+    /// difference between "the app is broken" and "the car is off".
+    func silenceNotice(now: Date = Date()) -> String? {
+        guard isVehicleSilent(now: now) else { return nil }
+        var parts = ["Vehicle not responding"]
+        if let last = lastUpdate {
+            parts.append("last reading \(Int(now.timeIntervalSince(last).rounded())) s ago")
+        } else {
+            parts.append("no reading since connecting")
+        }
+        if let supplyVolts {
+            parts.append(String(format: "%.1f V at the adapter", supplyVolts))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: - Polling
 
     private func startPolling() {
@@ -1106,66 +1157,19 @@ final class LiveModel {
             guard let self, let elm else { return }
 
             while !Task.isCancelled {
-                // Manufacturer and DTC work address modules directly; restore
-                // broadcast before sampling so live values keep their meaning.
-                _ = try? await elm.send("ATSH7DF", timeout: 2)
+                // The car going quiet is judged on every iteration, from the
+                // last sample and not from a success: measuring silence inside
+                // the success path always read zero, so a sleeping ECU left no
+                // data_gap in the log and looked like a frozen app.
+                reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
 
-                for signal in signals {
-                    if Task.isCancelled { return }
-                    await sample(signal, using: elm)
-                }
+                let reference = lastUpdate ?? connectedAt
+                let quiet = silence.shouldPollQuietly(now: Date(), reference: reference)
 
-                // A crank lasts one to two seconds. While the engine is off,
-                // sample voltage a second time per cycle so the dip is caught.
-                if (lastRPM ?? 0) < 400,
-                   let voltage = signals.first(where: { $0.pid == "42" }) {
-                    if Task.isCancelled { return }
-                    await sample(voltage, using: elm)
-                }
-
-                if isRecording,
-                   Date().timeIntervalSince(lastOdometerRead) > 60 {
-                    lastOdometerRead = Date()
-                    if let reading = await readOdometer(using: elm) {
-                        odometerKm = reading
-                    }
-                }
-
-                if Task.isCancelled { return }
-                if identificationIsDue() {
-                    await attemptIdentification(using: elm)
-                }
-                if (lastRPM ?? 0) > 400, !verificationDone,
-                   [ProfileResolver.Method.calibration.rawValue,
-                    ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod) {
-                    await verifyResolvedProfile(using: elm)
-                }
-
-                if Task.isCancelled { return }
-                await stepDTCScan(using: elm)
-
-                if Task.isCancelled { return }
-                await stepPriorityScan(using: elm)
-                if Task.isCancelled { return }
-                await stepPriorityScan(using: elm)
-
-                if Task.isCancelled { return }
-                await stepProfileScan(using: elm)
-
-                // One-time enrichment, once the bus is actually answering. Doing
-                // this before polling was what delayed the first live reading.
-                if !didInitialReads, isRecording, let last = lastUpdate,
-                   Date().timeIntervalSince(last) < 5 {
-                    didInitialReads = true
-                    await readDPF()
-                    await captureTripSnapshot(phase: "start", using: elm)
-                    if let connectStartedAt {
-                        session.event(.startupTiming, [
-                            "phase": "first_sample",
-                            "sinceConnectMs": Self.millis(
-                                Date().timeIntervalSince(connectStartedAt) * 1000)
-                        ])
-                    }
+                if quiet {
+                    await quietCycle(using: elm)
+                } else {
+                    await sampleCycle(using: elm)
                 }
 
                 lastLoopTick = Date()
@@ -1176,9 +1180,13 @@ final class LiveModel {
                     syncRecordingState()
                 }
 
-                // A sleeping vehicle will not start answering because we ask
-                // faster. Back off so a parked session is cheap.
-                if let last = lastUpdate, Date().timeIntervalSince(last) > 5 {
+                if quiet {
+                    // A sleeping vehicle will not start answering because we ask
+                    // faster, and every request in the full cycle is one that
+                    // cannot be answered.
+                    try? await Task.sleep(
+                        nanoseconds: UInt64(silence.quietInterval * 1_000_000_000))
+                } else if let last = lastUpdate, Date().timeIntervalSince(last) > 5 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
 
@@ -1191,6 +1199,90 @@ final class LiveModel {
                 iteration += 1
             }
         }
+    }
+
+    /// One full pass: every live signal, then the periodic extra work.
+    private func sampleCycle(using elm: ELMClient) async {
+        // Manufacturer and DTC work address modules directly; restore
+        // broadcast before sampling so live values keep their meaning.
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        for signal in signals {
+            if Task.isCancelled { return }
+            await sample(signal, using: elm)
+        }
+
+        // A crank lasts one to two seconds. While the engine is off,
+        // sample voltage a second time per cycle so the dip is caught.
+        if (lastRPM ?? 0) < 400,
+           let voltage = signals.first(where: { $0.pid == "42" }) {
+            if Task.isCancelled { return }
+            await sample(voltage, using: elm)
+        }
+
+        if isRecording,
+           Date().timeIntervalSince(lastOdometerRead) > 60 {
+            lastOdometerRead = Date()
+            if let reading = await readOdometer(using: elm) {
+                odometerKm = reading
+            }
+        }
+
+        if Task.isCancelled { return }
+        if identificationIsDue() {
+            await attemptIdentification(using: elm)
+        }
+        if (lastRPM ?? 0) > 400, !verificationDone,
+           [ProfileResolver.Method.calibration.rawValue,
+            ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod) {
+            await verifyResolvedProfile(using: elm)
+        }
+
+        if Task.isCancelled { return }
+        await stepDTCScan(using: elm)
+
+        if Task.isCancelled { return }
+        await stepPriorityScan(using: elm)
+        if Task.isCancelled { return }
+        await stepPriorityScan(using: elm)
+
+        if Task.isCancelled { return }
+        await stepProfileScan(using: elm)
+
+        // One-time enrichment, once the bus is actually answering. Doing
+        // this before polling was what delayed the first live reading.
+        if !didInitialReads, isRecording, let last = lastUpdate,
+           Date().timeIntervalSince(last) < 5 {
+            didInitialReads = true
+            await readDPF()
+            await captureTripSnapshot(phase: "start", using: elm)
+            if let connectStartedAt {
+                session.event(.startupTiming, [
+                    "phase": "first_sample",
+                    "sinceConnectMs": Self.millis(
+                        Date().timeIntervalSince(connectStartedAt) * 1000)
+                ])
+            }
+        }
+    }
+
+    /// One gentle exchange while the car is asleep.
+    ///
+    /// The adapter's own supply voltage still works with the ignition off, so it
+    /// is read for the display. Engine speed is then asked of the ECU: the reply
+    /// to a real PID is what proves the car has woken, and a successful read
+    /// returns the loop to the full cycle by itself. Without that probe, quiet
+    /// mode would be a one-way door.
+    private func quietCycle(using elm: ELMClient) async {
+        // The sweep may have left a module header selected.
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        if let reply = try? await elm.send("ATRV", timeout: 2) {
+            supplyVolts = reply.supplyVolts
+        }
+
+        guard let rpm = signals.first(where: { $0.pid == "0C" }) else { return }
+        await sample(rpm, using: elm)
     }
 
     private var iteration = 0
@@ -1207,7 +1299,6 @@ final class LiveModel {
         else { return }
 
         readings.setStandard(pid: signal.pid, value: value, at: Date())
-        reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
 
         // The ECU may have been asleep when we probed. Now that it is answering,
         // ask again so an unnecessary empty capability set is not recorded.

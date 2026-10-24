@@ -7,61 +7,77 @@ import OBDCore
 struct ContentView: View {
     @State private var model = LiveModel()
     @State private var showingSessions = false
+    /// Drives the age of the last reading. It has to be a clock on this side:
+    /// when the car stops answering, nothing else on screen changes.
+    @State private var now = Date()
     @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [GridItem(.adaptive(minimum: 132), spacing: 12)]
 
     var body: some View {
-        VStack(spacing: 16) {
-            header
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    header
 
-            if let status = dpfLine {
-                Text(status)
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-            }
+                    if let status = dpfLine {
+                        Text(status)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                    }
 
-            if model.signals.isEmpty {
-                Text("No standard signals are defined by this vehicle profile.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(model.signals) { signal in
-                        Tile(signal: signal, value: model.values[signal.pid])
+                    if model.signals.isEmpty {
+                        Text("No standard signals are defined by this vehicle profile.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(model.signals) { signal in
+                                Tile(
+                                    signal: signal,
+                                    value: model.values[signal.pid],
+                                    dimmed: silent
+                                )
+                            }
+                        }
+                    }
+
+                    codesLine
+
+                    if let battery = model.batteryReport, battery.startObserved {
+                        batteryLine(battery)
+                    }
+
+                    if !model.manufacturerHighlights.isEmpty {
+                        manufacturerSection
+                            .opacity(silent ? 0.45 : 1)
+                    }
+
+                    if let notice = model.notice {
+                        Text(notice)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .padding(20)
             }
 
-            codesLine
-
-            if let battery = model.batteryReport, battery.startObserved {
-                batteryLine(battery)
-            }
-
-            if !model.manufacturerHighlights.isEmpty {
-                manufacturerSection
-            }
-
-            if let notice = model.notice {
-                Text(notice)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Spacer(minLength: 0)
-
+            // Outside the scroll view: the one control that has to stay
+            // reachable on a small screen.
             controls
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
         }
-        .padding(20)
         #if os(macOS)
         .frame(minWidth: 380, minHeight: 540)
         #endif
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
         .onChange(of: scenePhase) { _, phase in
+            recordPhase(phase)
             if phase == .active { model.appDidBecomeActive() }
         }
         .sheet(isPresented: $showingSessions) {
@@ -74,6 +90,21 @@ struct ContentView: View {
             model.prepareForTermination()
         }
         #endif
+    }
+
+    /// The car has gone quiet. Nothing on screen can change until it answers,
+    /// so say why rather than letting the app look frozen.
+    private var silent: Bool {
+        model.isVehicleSilent(now: now)
+    }
+
+    private func recordPhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active: model.appDidChangePhase(.active)
+        case .inactive: model.appDidChangePhase(.inactive)
+        case .background: model.appDidChangePhase(.background)
+        @unknown default: break
+        }
     }
 
     private var header: some View {
@@ -92,6 +123,12 @@ struct ContentView: View {
             Text(model.status)
                 .font(.subheadline)
                 .foregroundStyle(statusColor)
+            if let silence = model.silenceNotice(now: now) {
+                Label(silence, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if model.isConnected, !model.adapterName.isEmpty {
                 Text(model.adapterName)
                     .font(.caption)
@@ -105,6 +142,7 @@ struct ContentView: View {
         if case .failed = model.phase { return .red }
         if case .reconnecting = model.phase { return .orange }
         if case .failed = model.recording { return .red }
+        if silent { return .orange }
         return .secondary
     }
 
@@ -287,6 +325,9 @@ struct ContentView: View {
 private struct Tile: View {
     let signal: VehicleProfile.StandardSignal
     let value: Double?
+    /// Stale values are dimmed rather than removed: knowing what the car last
+    /// said is still useful, but it must not look live.
+    var dimmed: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -305,6 +346,7 @@ private struct Tile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+        .opacity(dimmed ? 0.45 : 1)
     }
 }
 

@@ -195,6 +195,19 @@ Each of these has already caused a wrong conclusion.
 - **One battery report per engine cycle, not per connection.** The monitor resets
   after the engine has been stopped for five seconds, so a restart in the same
   connection is measured again.
+- **A silent car is not a hung app, and used to look exactly like one.** With the
+  ignition off the ECU sleeps while the adapter keeps answering "NO DATA" in
+  ~270 ms; the link is healthy and nothing is ever recorded. Two things made this
+  look like a freeze: the screen kept showing the last values under "Connected",
+  and `DataGapMonitor` was fed only after a successful sample, so the silence it
+  measured had just been reset and `data_gap` could never fire. Silence is now
+  judged at the top of every loop iteration, announced in the UI after five
+  seconds, and after fifteen the loop degrades to `ATRV` plus one rpm probe every
+  three seconds until the car answers again. Check `app_lifecycle` and `data_gap`
+  before blaming the app.
+- **The main screen scrolls because it is wrapped in a `ScrollView`, not because
+  it worked before.** "It stopped scrolling" was reported as evidence of a hang;
+  the screen had no scroll view at all.
 
 ## Status — what is proven
 
@@ -203,7 +216,9 @@ learning, rail pressure, turbo boost, DTC scanning on both ECUs, battery test, Z
 export, locked-screen background recording on the iPhone.
 
 Not yet observed: the 10-minute idle disconnect, the 10-minute reconnect window,
-and regeneration detection against a real regeneration.
+regeneration detection against a real regeneration, and quiet mode past its entry
+(silence is announced and the loop degrades as designed, but the car has not yet
+been watched waking back out of it).
 
 ## Conventions
 

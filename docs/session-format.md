@@ -105,7 +105,7 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 `adapter_disconnected`, `adapter_reconnected`, `recording_interrupted`,
 `battery_test`, `data_gap`, `data_resumed`, `regen_started`, `regen_ended`,
 `sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `profile_changed`,
-`profile_disagreement`, `startup_timing`, `error`.
+`profile_disagreement`, `startup_timing`, `app_lifecycle`, `error`.
 
 `startup_timing` records where connection time went: Bluetooth ready, adapter
 discovery (or direct retrieval of the known adapter), BLE setup, ELM
@@ -129,6 +129,22 @@ wrong byte offset can be found without re-driving the car.
 answering while recording continued — usually ignition off. The adapter stays
 connected in that case, because OBD pin 16 is permanent battery power and the
 dongle never loses power; only the ECU sleeps.
+
+While a gap is open the app stops asking the full signal list — every request
+would go unanswered — and instead reads the adapter's own supply voltage (`ATRV`,
+which needs no ECU) plus engine speed once every three seconds. That single real
+PID read is what detects the car waking up; a successful read ends the gap and
+restores the full cycle by itself.
+
+`app_lifecycle` records `active`, `inactive` and `background` transitions, with
+`quietSeconds` — how long the car had been silent at that moment. It exists
+because "the app froze" is otherwise indistinguishable from "the car was off":
+the last file, plus the phone's system log, settled exactly that question once.
+
+The screen also says when the car has gone quiet: after five seconds without a
+sample the status line reads *Vehicle not responding*, the values dim and show
+their age, so a parked car does not look like a hung app. Those values are the
+last ones the car gave — they are never refreshed or zeroed to fill the gap.
 
 `adapter_connected` is written after the session starts, so it always appears.
 
