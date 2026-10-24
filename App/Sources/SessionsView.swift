@@ -152,7 +152,9 @@ struct SessionsView: View {
         VStack(spacing: 6) {
             if let selected {
                 HStack(spacing: 12) {
-                    Text(selected.id)
+                    // The identifier is a UTC timestamp; the list above shows
+                    // local time. Say which, or the two look contradictory.
+                    Text("\(selected.id) · UTC")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
