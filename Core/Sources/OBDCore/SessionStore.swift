@@ -19,10 +19,20 @@ public enum SessionStore {
 
     /// Sortable and unique: timestamp plus a short random suffix, so two
     /// sessions started in the same second cannot collide.
-    public static func makeSessionID(now: Date = Date()) -> String {
+    /// The recording device's local time, plus a random suffix.
+    ///
+    /// Local rather than UTC because this name is what a person reads in Finder,
+    /// in an export and in the app: a session recorded at breakfast should not be
+    /// dated the previous evening. `manifest.startedAt` stays UTC and the offset
+    /// is recorded separately, so the instant is never lost, and list ordering
+    /// comes from `startedAt` rather than from the name.
+    public static func makeSessionID(
+        now: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let suffix = String(UUID().uuidString.prefix(4))
         return "\(formatter.string(from: now))-\(suffix)"

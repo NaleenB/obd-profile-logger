@@ -14,9 +14,14 @@ OBDLogger/Sessions/<yyyyMMdd-HHmmss>-<4 hex>/
   profile.json      the decoding rules used, copied in at session start
 ```
 
-Session IDs are UTC timestamps plus a random suffix, so they sort chronologically
-and two sessions in the same second cannot collide. An existing directory is
-never reused.
+Session IDs are the recording device's local time plus a random suffix, so a
+session recorded at breakfast is dated that morning. Two sessions in the same
+second cannot collide, because an existing directory is never reused.
+
+Older sessions were named in UTC; list ordering is therefore taken from
+`startedAt` (UTC) rather than from the directory name, which keeps the list
+correct across a timezone change or a daylight-saving transition. The manifest
+records `timezoneOffsetSeconds` alongside, so local time is always recoverable.
 
 NDJSON is canonical. CSV is never written as a source of truth. Export archives the
 whole session directory unchanged — `manifest.json`, `samples.ndjson`,

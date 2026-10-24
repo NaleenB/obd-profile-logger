@@ -50,10 +50,14 @@ public struct SessionSummary: Identifiable, Equatable {
 
 public extension SessionStore {
 
-    /// Newest first. Tolerant of a session that never finished: those are shown
-    /// as incomplete rather than hidden.
+    /// Newest first, by recorded start time rather than by directory name.
+    ///
+    /// Names use the recording device's local time, so a store that has moved
+    /// between timezones — or predates the change from UTC names — does not sort
+    /// correctly by string. `startedAt` is UTC and authoritative.
+    /// Incomplete sessions are shown as such rather than hidden.
     static func summaries(root: URL? = nil) -> [SessionSummary] {
-        sessions(root: root).map { directory in
+        let all = sessions(root: root).map { directory in
             let manifest = readManifest(at: directory)
             return SessionSummary(
                 directory: directory,
@@ -64,6 +68,10 @@ public extension SessionStore {
                 adapterName: manifest?.adapterName,
                 vehicleProfileID: manifest?.vehicleProfileID
             )
+        }
+        return all.sorted { lhs, rhs in
+            // A manifest that cannot be read falls back to its name.
+            (lhs.startedAt ?? lhs.id) > (rhs.startedAt ?? rhs.id)
         }
     }
 }
