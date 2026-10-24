@@ -10,7 +10,10 @@ public enum SessionSchema {
     /// 2: `pid` became optional so service `0x21` observations can carry a
     /// local identifier instead.
     /// 3: `unit` is omitted when unknown rather than written as an empty string.
-    public static let version = 3
+    /// 4: `profileMatch` and `profileHash` describe the profile the session
+    ///    ended with. A session can start generic and resolve while recording,
+    ///    which is recorded as a `profile_changed` event.
+    public static let version = 4
 }
 
 public struct SessionManifest: Codable, Equatable {
@@ -28,8 +31,8 @@ public struct SessionManifest: Codable, Equatable {
     /// "succeeded" or "failed". An empty `supportedPIDs` alone cannot express
     /// the difference between "the car supports nothing" and "we could not ask".
     public var capabilityDiscovery: String?
-    /// How the vehicle profile was chosen: calibration, vin, agreement, assumed,
-    /// generic or manual. A wrong decode can be traced from this.
+    /// How the vehicle profile was chosen: calibration, vin, agreement, none or
+    /// override (development only). A wrong decode can be traced from this.
     public var profileMatch: String?
     /// SHA-256 of the profile JSON actually used. A profile change alters
     /// decoding silently, so the hash is what lets two sessions be compared.
@@ -165,6 +168,8 @@ public enum SessionEventType: String, Codable {
     case adapterReconnected = "adapter_reconnected"
     case recordingInterrupted = "recording_interrupted"
     case sweepCompleted = "sweep_completed"
+    case profileChanged = "profile_changed"
+    case profileDisagreement = "profile_disagreement"
     case regenStarted = "regen_started"
     case regenEnded = "regen_ended"
     case tripSnapshot = "trip_snapshot"

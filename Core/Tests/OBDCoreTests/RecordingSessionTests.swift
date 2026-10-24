@@ -65,6 +65,29 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(written.notes.contains { $0.contains("did not answer at session start") })
     }
 
+    /// A profile can resolve while recording: the manifest and the archived
+    /// decoding rules both have to end up describing the samples.
+    func testProfileCanBeUpdatedAfterResolution() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        let copy = Data(#"{"id":"mitsubishi-outlander-2016-4n14"}"#.utf8)
+        try session.replaceProfileCopy(with: copy)
+        session.updateProfile(id: "mitsubishi-outlander-2016-4n14",
+                              hash: "abc123", match: "calibration")
+        session.stop(reason: "test")
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.vehicleProfileID, "mitsubishi-outlander-2016-4n14")
+        XCTAssertEqual(written.profileHash, "abc123")
+        XCTAssertEqual(written.profileMatch, "calibration")
+
+        let archived = try String(contentsOf: directory.appendingPathComponent(SessionRecorder.profileFilename()),
+                                  encoding: .utf8)
+        XCTAssertTrue(archived.contains("mitsubishi-outlander-2016-4n14"))
+    }
+
     /// Exactly one start event, even when the caller supplies metadata.
     func testStartWritesExactlyOneStartEvent() throws {
         let session = RecordingSession()
@@ -120,7 +143,7 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(row["name"] as? String, "Soot loading by summation")
         XCTAssertEqual(row["unit"] as? String, "g/L")
         XCTAssertEqual(row["value"] as? Double, 2.6)
-        XCTAssertEqual(row["schemaVersion"] as? Int, 3)
+        XCTAssertEqual(row["schemaVersion"] as? Int, SessionSchema.version)
     }
 
     /// An unknown unit is omitted rather than written as an empty string.

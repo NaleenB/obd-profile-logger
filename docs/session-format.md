@@ -30,15 +30,16 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | format version (3) |
+| `schemaVersion` | format version (4) |
 | `sessionID` | directory name |
 | `startedAt`, `finishedAt` | wall clock, ISO 8601 |
 | `appVersion` | build that wrote the session |
-| `vehicleProfileID` | profile assumed by this build, or null |
+| `vehicleProfileID` | profile in effect when the session ended; `generic-iso15765-can` when none matched |
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
 | `supportedPIDs` | full capability set discovered during the session; null when discovery never succeeded |
 | `capabilityDiscovery` | `succeeded` or `failed` — written at stop, so a cold start that resolved once the ECU woke records `succeeded` |
-| `profileHash` | SHA-256 of the profile JSON used, so a decode change is detectable |
+| `profileMatch` | `calibration`, `vin`, `agreement`, `none`, or `override` (development only) — written at stop |
+| `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
 | `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval |
 | `ambientTempC` | intake air temperature before the engine started, used as an ambient proxy |
@@ -56,14 +57,14 @@ and its own presence.
 Standard PID observation (`pid` present):
 
 ```json
-{"schemaVersion":3,"elapsedMs":1234,"wallTime":"2026-10-23T03:21:07.512Z",
+{"schemaVersion":4,"elapsedMs":1234,"wallTime":"2026-10-23T03:21:07.512Z",
  "pid":"23","name":"Rail","value":337.2,"unit":"bar","raw":"41230D2C"}
 ```
 
 Manufacturer observation (`pid` absent, `service`/`lid` present):
 
 ```json
-{"schemaVersion":3,"elapsedMs":9100,"wallTime":"2026-10-23T03:21:16Z",
+{"schemaVersion":4,"elapsedMs":9100,"wallTime":"2026-10-23T03:21:16Z",
  "service":"21","lid":"11","itemNumber":155,
  "name":"Soot loading by summation","value":2.6,"unit":"g/L","raw":"6111141F34061D"}
 ```
@@ -91,14 +92,27 @@ NTP, user change) cannot make session time go backwards.
 ## events.ndjson
 
 ```json
-{"schemaVersion":3,"elapsedMs":9004,"wallTime":"2026-10-23T03:21:14Z",
+{"schemaVersion":4,"elapsedMs":9004,"wallTime":"2026-10-23T03:21:14Z",
  "type":"dtc_snapshot","details":{"complete":"true","summary":"No codes in any module"}}
 ```
 
 Types: `session_started`, `session_stopped`, `adapter_connected`,
 `adapter_disconnected`, `adapter_reconnected`, `recording_interrupted`,
 `battery_test`, `data_gap`, `data_resumed`, `regen_started`, `regen_ended`,
-`sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `error`.
+`sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `profile_changed`,
+`profile_disagreement`, `error`.
+
+`profile_changed` marks the boundary where a vehicle profile was applied. The app
+starts on generic OBD and may identify the car while recording, once the ECU wakes
+or the engine runs. It carries `from`, `to`, `method` and `reason`. No manufacturer
+sample is written before that event, so the archived `profile.json` describes every
+one of them; samples are self-describing (`name`, `unit`, `value`, `raw`) either
+way.
+
+`profile_disagreement` means the profile matched by calibration or VIN, but a
+required discriminator (engine speed) did not agree with the ECU's own reading. The
+profile is kept — calibration is authoritative — and the evidence is recorded so a
+wrong byte offset can be found without re-driving the car.
 
 `data_gap` / `data_resumed` bracket a stretch where the vehicle stopped
 answering while recording continued — usually ignition off. The adapter stays

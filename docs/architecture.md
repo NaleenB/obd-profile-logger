@@ -137,10 +137,14 @@ ASX would answer `2111` happily and decode to nonsense under these offsets, whic
 is worse than no data because it looks plausible.
 
 Hence identity matching rather than capability matching. A profile with neither
-`calibrationIDs` nor `vinPrefixes` is never auto-selected; it can still be chosen
-by hand, which is the right signal that the driver knows what they are doing.
+`calibrationIDs` nor `vinPrefixes` can still be matched by the live-data route its
+`identity` block declares, but answering a manufacturer service alone is never
+enough.
 
-The picker exists as an override.
+There is no picker and no manual override in the interface. An unidentified car
+runs on standard OBD only; nothing is decoded with unproven offsets. Identification
+is retried while the session runs, so a car that was asleep at connect resolves
+once it wakes or the engine runs.
 
 ## Extension points
 

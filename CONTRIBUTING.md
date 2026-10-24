@@ -66,7 +66,7 @@ Planned, in rough order. Nothing here is committed to a date.
 |---|---|
 | ~~Session history~~ | done — sessions list, per-session export, share-all, delete |
 | ~~Profile-driven standard PIDs~~ | done — both shipped profiles define their own signal list and scaling |
-| ~~Profile picker~~ | done — two profiles ship, chosen from the header |
+| ~~Profile picker~~ | done — then removed: identification is automatic and there is no picker |
 | Baseline learning | compare a drive against the car's own normal, not just factory limits |
 | Background recording | keep a session running with the phone locked |
 | More vehicle profiles | the whole point — `profiles/generic/iso15765-can.json` is the template |

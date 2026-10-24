@@ -90,11 +90,61 @@ needed per PID: `value = raw * factor + offset`, read big-endian over `bytes`
 This is what makes the tool work on a car it has never seen: a profile that lists
 PIDs `05`, `0C`, `0D` with their scaling will display them, with no code change.
 
-Set `calibrationIDs` (mode `09` PID `04`) and/or `vinPrefixes` so the app can
-match this car to this profile. Without one of them the profile is never chosen
-automatically — answering the manufacturer service alone is not enough, because
-block layouts differ between ECU software versions. The picker remains as a
-manual override.
+### `calibrationIDs` and `vinPrefixes`
+
+The two identity routes. `calibrationIDs` is the sharpest — byte layouts follow the
+ECU software version — and `vinPrefixes` is the fallback when the calibration ID
+cannot be read. The longest matching VIN prefix wins.
+
+There is no picker and no assumption route: a profile without either field can only
+be matched by live-data agreement, described below.
+
+### `identity`
+
+What the app needs to recognise this car **without** a VIN or calibration read,
+which is the normal case when the ECU was asleep at connect. The app decodes the
+declared manufacturer items with this profile and compares them with values the
+ECU reports independently over standard OBD. A wrong byte layout cannot pass.
+
+```json
+"identity": {
+  "probeLIDs": ["01", "02", "03"],
+  "discriminators": [
+    { "itemNumber": 2, "sameAsPID": "0C", "tolerance": 50,
+      "weight": 0.5, "required": true, "minimumStandard": 400 },
+    { "itemNumber": 7, "sameAsPID": "05", "tolerance": 5, "weight": 0.3 }
+  ],
+  "plausibility": [
+    { "itemNumber": 145, "min": 100, "max": 2000000, "weight": 0.2 }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `probeLIDs` | local identifiers to read for evidence; keep it to a few blocks |
+| `discriminators[].itemNumber` | a manufacturer item this profile decodes |
+| `discriminators[].sameAsPID` | the standard PID reporting the same quantity |
+| `discriminators[].tolerance` | how close the two must be to count as agreement |
+| `discriminators[].weight` | contribution to the score, out of 1.0 |
+| `discriminators[].required` | must agree before the profile can be applied |
+| `discriminators[].minimumStandard` | below this the comparison proves nothing (engine off reads 0 rpm) |
+| `plausibility[]` | a range check with no reference value; corroborates only |
+
+Rules that matter:
+
+- **At least one discriminator must be `required`.** Without one the profile can
+  never be applied by agreement.
+- **Engine speed is the right required discriminator** because it changes fast: a
+  wrong byte cannot track it. Coolant is too slow to decide on its own.
+- `minimumStandard` exists because with the engine off every layout "agrees" on
+  zero rpm.
+- Agreement must hold for three consecutive probes, so a single lucky byte is not
+  enough.
+- A `sameAsPID` that the profile does not poll cannot be a reference.
+
+The app only displays manufacturer data after a profile is applied, so a profile
+that never matches costs nothing but a few probes.
 
 Both `transport` and `standard` are optional. Without them the app uses a generic
 baseline, auto-detects the protocol, and filters the list to whatever the car

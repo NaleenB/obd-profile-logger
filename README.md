@@ -78,21 +78,23 @@ cd Probe && ./run.sh --sweep-only --service 21
 
 Two minutes, read-only. Any identifier that answers is a candidate for a profile.
 
-The app picks the profile itself, by four routes in order of strength:
+The app identifies the car itself and never asks. Three routes, in order of
+strength:
 
 1. **Calibration ID match** (mode 09 PID 04) — the sharpest test, since byte layouts
    follow the ECU software version.
-2. **VIN prefix match**, when the calibration ID cannot be read.
+2. **VIN prefix match**, when the calibration ID cannot be read. The longest
+   matching prefix wins.
 3. **Live-data agreement** — decode "engine speed" from the manufacturer block and
-   check it against the ECU's own rpm over standard OBD. A wrong layout produces a
-   byte that almost never agrees.
-4. **Explicit assumption**, with an on-screen notice, when identity is unreadable,
-   only one specific profile exists, and the engine is not running to allow (3).
+   check it against the ECU's own rpm over standard OBD. It has to agree three
+   probes running; a wrong layout produces a byte that cannot track it.
 
-Otherwise it falls back to generic OBD. Answering `0x21` is never treated as proof
-that the offsets apply — several models speak it with completely different block
-layouts, and a wrong match would produce confident nonsense. A manual override
-appears in the interface whenever the app is not confident.
+There is no profile picker. Until the car proves which profile applies — often a
+few seconds after the ECU wakes — the app runs on standard OBD only and says so.
+Manufacturer data appears when identification succeeds, never before. Answering
+`0x21` is never treated as proof that the offsets apply: several models speak it
+with completely different block layouts, and a wrong match would produce confident
+nonsense.
 
 ## Quick start
 
@@ -118,7 +120,7 @@ service at all: `./run.sh --sweep-only --service 21`.
 ## What it does
 
 - **Live data** over BLE, with a profile-driven manufacturer panel
-- **Automatic profile selection** from calibration ID or VIN, with a manual override
+- **Automatic vehicle identification** from calibration ID, VIN or live-data agreement, with no profile picker
 - **Automatic recording** on connect, to append-only NDJSON: one line per successful
   observation, each with its own monotonic timestamp, plus a manifest and events
 - **DTC scanning** with per-module attribution, distinguishing "no codes" from

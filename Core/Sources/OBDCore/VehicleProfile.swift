@@ -86,6 +86,53 @@ public struct VehicleProfile: Codable, Equatable {
         public var lidValue: UInt8? { UInt8(lid, radix: 16) }
     }
 
+    /// How to recognise this vehicle from the data it reports.
+    ///
+    /// Mode 09 identity (VIN, calibration ID) is the preferred proof, but it can
+    /// be unreadable while the ECU is asleep. These rules let the app test a
+    /// profile against the car instead: decode a manufacturer item and compare it
+    /// with the same quantity from standard OBD. A wrong layout produces a byte
+    /// unrelated to the quantity, so it cannot pass.
+    public struct IdentitySpec: Codable, Equatable {
+        /// Local identifiers to read when gathering evidence. Keep this to a few
+        /// blocks: the probe runs while the engine is running and should cost
+        /// well under a second.
+        public let probeLIDs: [String]
+        public let discriminators: [Discriminator]
+        public let plausibility: [PlausibilityRule]?
+
+        public var lidValues: [UInt8] { probeLIDs.compactMap { UInt8($0, radix: 16) } }
+    }
+
+    /// One quantity the profile claims to know, paired with the standard PID that
+    /// reports the same thing independently.
+    public struct Discriminator: Codable, Equatable {
+        public let itemNumber: Int
+        /// Standard OBD-II PID reporting the same quantity, hex.
+        public let sameAsPID: String
+        public let tolerance: Double
+        public let weight: Double
+        /// A required discriminator must agree before the profile is applied.
+        /// Engine speed is required: it changes fast, so a wrong byte cannot
+        /// track it.
+        public let required: Bool?
+        /// The comparison only means something above this standard value. Engine
+        /// speed needs 400 rpm, because with the engine off every profile agrees
+        /// on zero.
+        public let minimumStandard: Double?
+
+        public var pidValue: UInt8? { UInt8(sameAsPID, radix: 16) }
+    }
+
+    /// A range check that supports identification without needing a reference
+    /// value, such as a plausible odometer.
+    public struct PlausibilityRule: Codable, Equatable {
+        public let itemNumber: Int
+        public let min: Double
+        public let max: Double
+        public let weight: Double
+    }
+
     public let schemaVersion: Int
     public let id: String
     public let manufacturer: String
@@ -104,6 +151,8 @@ public struct VehicleProfile: Codable, Equatable {
     public let transport: Transport?
     public let standard: [StandardSignal]?
     public let blocks: [Block]
+    /// Absent means the profile can only be matched by calibration ID or VIN.
+    public let identity: IdentitySpec?
 
     /// Standard signals to poll, falling back to an empty list rather than
     /// inventing a set.

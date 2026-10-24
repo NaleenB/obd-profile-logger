@@ -31,6 +31,41 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertEqual(profile.localIdentifiers.count, profile.blocks.count)
     }
 
+    /// The identity block is what lets the app recognise the car with no VIN or
+    /// calibration read. Every reference in it has to exist, or the profile
+    /// silently stops being identifiable.
+    func testIdentityBlockReferencesRealParameters() throws {
+        let profile = try shippedProfile()
+        let identity = try XCTUnwrap(profile.identity, "the shipped profile should be identifiable from live data")
+
+        for lid in identity.probeLIDs {
+            XCTAssertNotNil(UInt8(lid, radix: 16), "probe lid \(lid) is not a hex byte")
+            XCTAssertTrue(profile.blocks.contains { $0.lid.lowercased() == lid.lowercased() },
+                          "probe lid \(lid) has no block")
+        }
+
+        var parameters: [Int: VehicleProfile.Parameter] = [:]
+        for block in profile.blocks {
+            for parameter in block.parameters {
+                if let number = parameter.itemNumber { parameters[number] = parameter }
+            }
+        }
+        let polledPIDs = Set(profile.signals.compactMap { UInt8($0.pid, radix: 16) })
+
+        XCTAssertTrue(identity.discriminators.contains { $0.required == true },
+                      "agreement needs a required discriminator")
+        for rule in identity.discriminators {
+            XCTAssertNotNil(parameters[rule.itemNumber], "item \(rule.itemNumber) is in no block")
+            let pid = try XCTUnwrap(rule.pidValue)
+            XCTAssertTrue(polledPIDs.contains(pid),
+                          "PID \(rule.sameAsPID) is not polled, so it cannot be a reference")
+        }
+        for rule in identity.plausibility ?? [] {
+            XCTAssertNotNil(parameters[rule.itemNumber], "item \(rule.itemNumber) is in no block")
+            XCTAssertLessThan(rule.min, rule.max)
+        }
+    }
+
     /// The captured frame from the car: 2.6 g/L soot by summation at byte 4.
     func testDecodesCapturedSootFrameUsingShippedProfile() throws {
         let profile = try shippedProfile()
@@ -240,83 +275,6 @@ final class GenericProfileTests: XCTestCase {
         }
     }
 }
-
-final class ProfileResolutionTests: XCTestCase {
-
-    private func profile(_ relative: String) throws -> VehicleProfile {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(relative)
-        return try VehicleProfileLoader.load(from: url)
-    }
-
-    private func shipped() throws -> [VehicleProfile] {
-        [try profile("profiles/mitsubishi/outlander-2016-4n14.json"),
-         try profile("profiles/generic/iso15765-can.json")]
-    }
-
-    private func identity() -> VehicleIdentity {
-        VehicleIdentity(vin: "JMFXLGF6WHZ000651", calibrationID: "1860C97201")
-    }
-
-    /// A car that answers a manufacturer service AND matches gets the specific
-    /// profile.
-    func testMatchingIdentitySelectsSpecificProfile() throws {
-        let chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: true, identity: identity(), among: try shipped())
-        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
-    }
-
-    /// The important case: a different Mitsubishi that also answers 0x21 must
-    /// not be given these offsets, because the block layout differs.
-    func testDifferentMitsubishiFallsBackToGeneric() throws {
-        let other = VehicleIdentity(vin: "MMBJNKB40GH000001", calibrationID: "9999999999")
-        let chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: true, identity: other, among: try shipped())
-        XCTAssertEqual(chosen, "generic-iso15765-can",
-                       "answering the service is not evidence that the offsets apply")
-    }
-
-    func testCalibrationIDAloneIsEnough() throws {
-        let chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: true,
-            identity: VehicleIdentity(calibrationID: "1860C97201"),
-            among: try shipped())
-        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
-    }
-
-    func testVinPrefixAloneIsEnough() throws {
-        let chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: true,
-            identity: VehicleIdentity(vin: "JMFXLGF6WHZ000651"),
-            among: try shipped())
-        XCTAssertEqual(chosen, "mitsubishi-outlander-2016-4n14")
-    }
-
-    /// A car that does not answer it gets the generic profile, not an error.
-    func testManufacturerUnavailableSelectsGeneric() throws {
-        let chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: false, identity: identity(), among: try shipped())
-        XCTAssertEqual(chosen, "generic-iso15765-can")
-    }
-
-    func testNoProfilesYieldsNothing() {
-        XCTAssertNil(ProfileCatalog.automaticID(
-            manufacturerAvailable: true, identity: identity(), among: []))
-    }
-
-    /// A generic profile declaring a manufacturer service would be a mistake, so
-    /// the resolver must not treat it as specific.
-    func testGenericProfileIsNotTreatedAsSpecific() throws {
-        let profiles = try shipped()
-        let specific = try XCTUnwrap(profiles.first { $0.manufacturer != "Generic" })
-        XCTAssertEqual(ProfileCatalog.automaticID(
-            manufacturerAvailable: true, identity: identity(), among: [profiles[1], specific]),
-                       specific.id)
-    }
-}
-
 
 final class VehicleIdentityDecoderTests: XCTestCase {
 

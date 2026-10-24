@@ -75,6 +75,26 @@ public final class RecordingSession {
         recorder.updateManifest { $0.notes.append(note) }
     }
 
+    /// The profile can resolve mid-session when the car was cold at connect.
+    /// Record the profile the samples were actually taken with, not the one the
+    /// manifest happened to start with.
+    public func updateProfile(id: String, hash: String?, match: String) {
+        guard let recorder else { return }
+        recorder.updateManifest {
+            $0.vehicleProfileID = id
+            $0.profileHash = hash
+            $0.profileMatch = match
+        }
+    }
+
+    /// Replaces the archived decoding rules. Safe because manufacturer samples
+    /// are only written once a profile is resolved, so the copy always describes
+    /// every block sample in the session.
+    public func replaceProfileCopy(with data: Data) throws {
+        guard let recorder else { return }
+        try data.write(to: recorder.directory.appendingPathComponent(SessionRecorder.profileFilename()))
+    }
+
     /// Stops recording and returns what actually happened. A partial session is
     /// reported as `.incomplete`, never as saved.
     @discardableResult

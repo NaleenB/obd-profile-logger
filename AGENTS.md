@@ -91,21 +91,36 @@ Do not re-derive these. Full detail in `../OUTLANDER.md` and `docs/protocol-note
 
 ## Profile selection
 
-Four routes, strongest first, implemented in `ProfileCatalog.automaticID`,
-`ProfileMatcher` and `LiveModel.resolveProfile`:
+**There is no profile picker, and no assumption path.** The app starts on generic
+OBD and applies a specific profile only when the car proves it. Implemented in
+`ProfileResolver`, `ProfileMatcher` and `LiveModel.attemptIdentification`:
 
-1. Calibration ID (mode `09` PID `04`) match.
-2. VIN prefix match.
-3. **Live-data agreement** — decode engine speed from the manufacturer block and
-   compare with the ECU's own rpm; a wrong layout almost never agrees within 50 rpm.
-4. Explicit assumption when identity is unreadable and exactly one specific
-   profile exists, with an on-screen notice.
+1. Calibration ID (mode `09` PID `04`) — sharpest, because byte layouts follow the
+   ECU software version.
+2. VIN prefix, longest match wins.
+3. **Live-data agreement** — the profile declares a required discriminator in its
+   `identity` block (engine speed), which must agree with the ECU's own rpm for
+   three consecutive probes. Coolant and plausibility ranges corroborate but never
+   decide; a required discriminator below its `minimumStandard` proves nothing
+   (engine off agrees on zero).
 
-Otherwise generic OBD. **Answering `0x21` is never treated as proof that a
-profile's offsets apply** — the same database holds five diesel variants with the
-DPF block on different identifiers. Never auto-apply a profile without one of the
-above; a plausible-looking wrong number is the failure mode this whole design
-guards against.
+Unresolved means **standard OBD only**: no manufacturer panel, no manufacturer
+samples. Identification is retried on a schedule (0, 15, 30, 60, 120, 300 s) so a
+cold ECU resolves when it wakes, then stops. A session can therefore start generic
+and resolve while recording; the boundary is a `profile_changed` event and the
+manifest carries the final profile.
+
+**Answering `0x21` is never treated as proof that a profile's offsets apply** — the
+same database holds five diesel variants with the DPF block on different
+identifiers. A plausible-looking wrong number is the failure mode this whole design
+guards against. If calibration matched but live data contradicts the layout, the
+profile stays and a `profile_disagreement` event records the evidence.
+
+Developer override, never reachable from the interface:
+
+```bash
+defaults write com.naleen.obdlogger ProfileOverride mitsubishi-outlander-2016-4n14
+```
 
 ## Data contracts
 
@@ -114,7 +129,7 @@ A session directory holds `manifest.json`, `samples.ndjson`, `events.ndjson` and
 Support; the Mac and the phone have separate stores with no sync.
 
 `SampleRecord` carries `pid` **or** `service`+`lid`, plus `value`, `unit` and the
-raw frame. `schemaVersion` is 3. See `docs/session-format.md` before changing a
+raw frame. `schemaVersion` is 4. See `docs/session-format.md` before changing a
 field — bump the version when a field's meaning changes, not when one is added.
 
 ## Build, test, deploy

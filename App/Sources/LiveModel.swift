@@ -67,7 +67,6 @@ final class LiveModel {
     private var gapMonitor = DataGapMonitor(threshold: 10)
     private var identity = VehicleIdentity()
     private var identityResolved = false
-    private var identityRetried = false
     private var odometerKm: Int?
     private var lastOdometerRead = Date.distantPast
     private var ambientTempC: Double?
@@ -93,25 +92,50 @@ final class LiveModel {
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
     private let dtcScanInterval: TimeInterval = 10
-    /// "auto" or an explicit profile id. Persisted so the choice survives a
-    /// relaunch. Automatic is the default: most drivers should never need this.
-    private(set) var profileSelection: String =
-        UserDefaults.standard.string(forKey: "profileSelection") ?? "auto"
 
-    /// Identifier actually in use after resolution. Goes into the manifest.
-    private(set) var profileID: String = ProfileCatalog.defaultID
+    // MARK: Profile identification
 
-    /// Profiles bundled with the app, for the picker.
+    /// Identifier in use. Starts generic and changes only when the car provides
+    /// evidence; there is no user-facing choice.
+    private(set) var profileID: String = ProfileCatalog.genericID
+    /// How it was chosen: calibration, vin, agreement, none or override.
+    private(set) var profileMatchMethod: String = ProfileResolver.Method.none.rawValue
+    /// True once the retry budget is spent without an answer.
+    private(set) var identificationExhausted = false
+
+    private var identificationAttempts = 0
+    private var nextIdentificationAt: Date?
+    private var disagreementChecked = false
+    private var profileReason = ""
+
+    /// Profiles bundled with the app, used as resolver candidates.
     let availableProfiles = ProfileCatalog.entries()
+    @ObservationIgnored
+    private lazy var candidateProfiles: [VehicleProfile] = availableProfiles.compactMap {
+        try? ProfileCatalog.load(id: resourceName(for: $0.id))
+    }
+
+    /// A development escape hatch, never reachable from the interface.
+    private let overrideProfileID: String? = {
+        guard let id = UserDefaults.standard.string(forKey: "ProfileOverride"),
+              ProfileCatalog.entries().contains(where: { $0.id == id })
+        else { return nil }
+        return id
+    }()
 
     /// True when the car answered a manufacturer service at connect time.
     private(set) var manufacturerServiceAvailable = false
 
     init() {
-        // Before connecting there is nothing to detect, so show the explicit
-        // choice if there is one, otherwise the default.
-        let initial = profileSelection == "auto" ? ProfileCatalog.defaultID : profileSelection
-        loadProfile(id: initial)
+        // A profile chosen by hand in an older build would defeat automatic
+        // identification, so it is discarded rather than migrated.
+        UserDefaults.standard.removeObject(forKey: "profileSelection")
+        if let overrideProfileID {
+            loadProfile(id: overrideProfileID)
+            profileMatchMethod = ProfileResolver.Method.override.rawValue
+        } else {
+            loadProfile(id: ProfileCatalog.genericID)
+        }
     }
 
     private func loadProfile(id: String) {
@@ -125,116 +149,272 @@ final class LiveModel {
         }
     }
 
-    private func resolveProfile(
-        manufacturerAvailable: Bool,
-        identity: VehicleIdentity,
-        using elm: ELMClient
-    ) async {
-        guard profileSelection == "auto" else {
-            loadProfile(id: profileSelection)
-            profileMatchMethod = "manual"
-            return
+    /// A profile is applied only when the required discriminators agree on three
+    /// consecutive probes. The probes are a few hundred milliseconds apart, so
+    /// identification still completes in seconds.
+    private static let agreementProbes = 3
+    private static let probeInterval: UInt64 = 400_000_000
+    /// Retry budget after connect. A cold ECU answers once it wakes; a car with
+    /// no matching profile should not cost requests for the whole session.
+    private static let identificationDelays: [TimeInterval] = [0, 15, 30, 60, 120, 300]
+
+    /// Asks the car what it is. This is the only route to a manufacturer
+    /// profile: there is no setting and no assumption.
+    private func attemptIdentification(using elm: ELMClient) async {
+        guard overrideProfileID == nil,
+              profileMatchMethod == ProfileResolver.Method.none.rawValue else { return }
+
+        // The service probe is only meaningful while the ECU is awake. A car
+        // that was asleep at connect can start answering later, and without
+        // this re-check the agreement route would stay unavailable.
+        if !manufacturerServiceAvailable {
+            manufacturerServiceAvailable = await detectManufacturerService(using: elm)
         }
-        let all = availableProfiles.compactMap {
-            try? ProfileCatalog.load(id: resourceName(for: $0.id))
+        if !identityResolved {
+            identity = await readIdentity(using: elm)
+            identityResolved = identity.calibrationID != nil || identity.vin != nil
         }
-        // With no identity, ask the car a question only the right offsets can
-        // answer: decode "engine speed" from the manufacturer block and see
-        // whether it agrees with the ECU's own rpm.
-        if manufacturerAvailable, !identityResolved {
-            if let matched = await identifyByAgreement(among: all, using: elm) {
-                loadProfile(id: matched.id)
-                profileMatchMethod = "agreement"
-                notice = "Identified \(matched.model) by matching manufacturer data against live readings."
-                return
+
+        // Identity is exact, so manufacturer data is only decoded when it has
+        // nothing to say.
+        var resolution = ProfileResolver.resolve(
+            candidates: candidateProfiles,
+            identity: identity,
+            manufacturerAvailable: false)
+
+        if !resolution.isResolved, manufacturerServiceAvailable {
+            resolution = await resolveByAgreement(using: elm) ?? resolution
+        }
+
+        profileReason = resolution.reason
+        apply(resolution)
+
+        if resolution.isResolved {
+            nextIdentificationAt = nil
+            identificationExhausted = false
+        } else {
+            identificationAttempts += 1
+            scheduleNextIdentification()
+        }
+    }
+
+    /// Decodes the same evidence each bundled profile asks for.
+    private func gatherEvidence(using elm: ELMClient)
+        async -> (standard: [UInt8: Double], decoded: [String: [Int: Double]]) {
+        var standard: [UInt8: Double] = [:]
+        var decoded: [String: [Int: Double]] = [:]
+
+        let referencedPIDs = Set(candidateProfiles.compactMap(\.identity)
+            .flatMap { $0.discriminators.compactMap(\.pidValue) })
+        for pid in referencedPIDs {
+            if let value = await readStandard(pid, using: elm) {
+                standard[pid] = value
             }
         }
 
-        var chosen = ProfileCatalog.automaticID(
-            manufacturerAvailable: manufacturerAvailable,
-            identity: identity,
-            among: all
-        )
-
-        // Calibration and VIN can be unreadable on the first attempt, especially
-        // with the ignition still off. Unknown identity is not the same as a
-        // mismatch: if there is exactly one specific profile, use it and say so.
-        let unknownIdentity = !identityResolved
-        let specific = all.filter { $0.manufacturer != "Generic" }
-        if manufacturerAvailable, unknownIdentity, chosen == "generic-iso15765-can", specific.count == 1 {
-            chosen = specific[0].id
-            profileMatchMethod = "assumed"
-            notice = "Calibration could not be read, so \(specific[0].model) is assumed. Change it in the profile menu if that is wrong."
-        } else if manufacturerAvailable, chosen == "generic-iso15765-can" {
-            profileMatchMethod = "generic"
-            notice = "This car answers a manufacturer service, but no profile matches its calibration. Using generic OBD only."
-        } else if chosen != "generic-iso15765-can" {
-            profileMatchMethod = identity.calibrationID != nil ? "calibration" : "vin"
-        }
-
-        loadProfile(id: chosen ?? ProfileCatalog.defaultID)
-    }
-
-    /// How the active profile was chosen: calibration, vin, agreement, assumed,
-    /// or manual. Recorded in the manifest so a wrong decode can be traced.
-    private(set) var profileMatchMethod: String = "default"
-
-    private func identifyByAgreement(among profiles: [VehicleProfile], using elm: ELMClient) async -> VehicleProfile? {
-        let specifics = profiles.filter { $0.manufacturer != "Generic" }
-        guard !specifics.isEmpty else { return nil }
-
-        // Standard values the car reports independently.
-        var standardRPM: Double?
-        if let reply = try? await elm.send("010C", timeout: 3),
-           let hex = reply.payloadHex, hex.hasPrefix("410C"),
-           let bytes = LiveModel.bytes(String(hex.dropFirst(4))), bytes.count >= 2 {
-            standardRPM = (Double(bytes[0]) * 256 + Double(bytes[1])) / 4
-        }
-        var standardCoolant: Double?
-        if let reply = try? await elm.send("0105", timeout: 3),
-           let hex = reply.payloadHex, hex.hasPrefix("4105"),
-           let bytes = LiveModel.bytes(String(hex.dropFirst(4))), let first = bytes.first {
-            standardCoolant = Double(first) - 40
-        }
-        // Needs the engine turning, or every profile agrees on zero.
-        guard let standardRPM, standardRPM > 400 else { return nil }
+        let probeLIDs = Set(candidateProfiles.compactMap(\.identity).flatMap(\.lidValues))
+        guard !probeLIDs.isEmpty else { return (standard, decoded) }
 
         var frames: [UInt8: MUT21Frame] = [:]
-        for lid in [UInt8(0x01), 0x02, 0x03] {
-            _ = try? await elm.send("ATSH7E0", timeout: 2)
-            let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3)
-            if let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) { frames[lid] = frame }
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        for lid in probeLIDs.sorted() {
+            if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
+               let hex = reply.payloadHex,
+               let frame = MUT21Frame(hex: hex) {
+                frames[lid] = frame
+            }
         }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
 
-        var best: (profile: VehicleProfile, evidence: ProfileEvidence)?
-        for profile in specifics {
-            var manufacturerRPM: Double?
-            var manufacturerCoolant: Double?
-            var odometer: Double?
-            for frame in frames.values {
+        for profile in candidateProfiles {
+            guard let spec = profile.identity else { continue }
+            var values: [Int: Double] = [:]
+            for lid in spec.lidValues {
+                guard let frame = frames[lid] else { continue }
                 for value in profile.decode(frame) {
-                    switch value.itemNumber {
-                    case 2: manufacturerRPM = value.value
-                    case 7: manufacturerCoolant = value.value
-                    case 145: odometer = value.value
-                    default: break
-                    }
+                    if let item = value.itemNumber { values[item] = value.value }
                 }
             }
-            let evidence = ProfileEvidence(
-                manufacturerRPM: manufacturerRPM,
-                standardRPM: standardRPM,
-                manufacturerCoolant: manufacturerCoolant,
-                standardCoolant: standardCoolant,
-                odometerKm: odometer
-            )
-            guard ProfileMatcher.isConvincing(evidence) else { continue }
-            if best == nil || ProfileMatcher.score(evidence) > ProfileMatcher.score(best!.evidence) {
-                best = (profile, evidence)
+            decoded[profile.id] = values
+        }
+        return (standard, decoded)
+    }
+
+    private func assess(_ evidence: (standard: [UInt8: Double], decoded: [String: [Int: Double]]))
+        -> [ProfileAssessment] {
+        candidateProfiles.compactMap { profile in
+            guard profile.identity != nil else { return nil }
+            return ProfileMatcher.assess(profile: profile,
+                                         manufacturer: evidence.decoded[profile.id] ?? [:],
+                                         standard: evidence.standard)
+        }
+    }
+
+    /// Repeats the comparison so one lucky byte cannot promote a profile.
+    private func resolveByAgreement(using elm: ELMClient) async -> ProfileResolver.Resolution? {
+        var streak: [String: Int] = [:]
+        var resolution: ProfileResolver.Resolution?
+
+        for round in 0..<Self.agreementProbes {
+            let evidence = await gatherEvidence(using: elm)
+            let current = assess(evidence)
+            for assessment in current {
+                streak[assessment.profileID] = assessment.convincing
+                    ? (streak[assessment.profileID] ?? 0) + 1
+                    : 0
+            }
+            let sustained = current.map { assessment in
+                ProfileAssessment(
+                    profileID: assessment.profileID,
+                    score: assessment.score,
+                    convincing: assessment.convincing
+                        && (streak[assessment.profileID] ?? 0) >= Self.agreementProbes,
+                    contradicted: assessment.contradicted,
+                    evidence: assessment.evidence
+                )
+            }
+            resolution = ProfileResolver.resolve(
+                candidates: candidateProfiles,
+                identity: identity,
+                manufacturerAvailable: true,
+                assessments: sustained)
+
+            // With the engine off every layout "agrees" on zero, and repeating
+            // the probe cannot change that.
+            if round == 0, !hasUsableReference(evidence.standard) { break }
+            if resolution?.isResolved == true { break }
+            if round < Self.agreementProbes - 1 {
+                try? await Task.sleep(nanoseconds: Self.probeInterval)
             }
         }
-        return best?.profile
+        return resolution
+    }
+
+    /// True when at least one required discriminator has a reference value above
+    /// its declared floor, so the comparison means something.
+    private func hasUsableReference(_ standard: [UInt8: Double]) -> Bool {
+        candidateProfiles.contains { profile in
+            profile.identity?.discriminators.contains { rule in
+                guard rule.required == true, let pid = rule.pidValue else { return false }
+                let reference = standard[pid] ?? 0
+                return reference > 0 && reference >= (rule.minimumStandard ?? 0)
+            } ?? false
+        }
+    }
+
+    private func scheduleNextIdentification() {
+        guard identificationAttempts < Self.identificationDelays.count else {
+            identificationExhausted = true
+            nextIdentificationAt = nil
+            return
+        }
+        nextIdentificationAt = Date()
+            .addingTimeInterval(Self.identificationDelays[identificationAttempts])
+    }
+
+    private func identificationIsDue(now: Date = Date()) -> Bool {
+        guard overrideProfileID == nil,
+              profileMatchMethod == ProfileResolver.Method.none.rawValue,
+              !identificationExhausted,
+              let nextIdentificationAt else { return false }
+        return now >= nextIdentificationAt
+    }
+
+    /// Applies a resolution. A change of profile mid-session is recorded rather
+    /// than hidden: the samples carry their own names and units, so a boundary
+    /// event is enough to attribute them.
+    private func apply(_ resolution: ProfileResolver.Resolution) {
+        guard let id = resolution.profileID else {
+            profileMatchMethod = ProfileResolver.Method.none.rawValue
+            return
+        }
+        guard id != profileID else {
+            profileMatchMethod = resolution.method.rawValue
+            return
+        }
+
+        let previous = profileID
+        loadProfile(id: id)
+        profileMatchMethod = resolution.method.rawValue
+        profileIndex = 0
+        sweep = SweepAccountant()
+        readings.clearManufacturer()
+        dpf = nil
+        rebuildSignalList()
+
+        if isRecording {
+            session.event(.profileChanged, [
+                "from": previous,
+                "to": id,
+                "method": resolution.method.rawValue,
+                "reason": resolution.reason
+            ])
+            if let data = profileURL.flatMap({ try? Data(contentsOf: $0) }) {
+                try? session.replaceProfileCopy(with: data)
+            }
+        }
+        notice = "\(profileDisplayName(id)) profile applied (\(resolution.method.rawValue))."
+    }
+
+    private func profileDisplayName(_ id: String) -> String {
+        if id == ProfileCatalog.genericID { return "Standard OBD" }
+        return availableProfiles.first { $0.id == id }?.title ?? id
+    }
+
+    /// Standard PID for a discriminator, decoded with a profile's own scaling so
+    /// no formula is hardcoded here.
+    private func readStandard(_ pid: UInt8, using elm: ELMClient) async -> Double? {
+        guard let reply = try? await elm.send(String(format: "01%02X", pid), timeout: 2),
+              let hex = reply.payloadHex,
+              hex.hasPrefix(String(format: "41%02X", pid)),
+              let data = LiveModel.bytes(String(hex.dropFirst(4)))
+        else { return nil }
+        let signal = candidateProfiles.lazy
+            .compactMap { $0.signals.first { $0.pidValue == pid } }
+            .first
+        return signal?.decode(data)
+    }
+
+    /// A profile matched by calibration or VIN should still behave like itself.
+    /// One check per session is enough to catch offsets that do not.
+    private func verifyResolvedProfile(using elm: ELMClient) async {
+        guard !disagreementChecked,
+              manufacturerServiceAvailable,
+              let profile, let spec = profile.identity,
+              let rpm = lastRPM, rpm > 400
+        else { return }
+        disagreementChecked = true
+
+        var standard: [UInt8: Double] = [0x0C: rpm]
+        if let coolant = await readStandard(0x05, using: elm) {
+            standard[0x05] = coolant
+        }
+
+        var values: [Int: Double] = [:]
+        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        for lid in spec.lidValues {
+            if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
+               let hex = reply.payloadHex,
+               let frame = MUT21Frame(hex: hex) {
+                for value in profile.decode(frame) {
+                    if let item = value.itemNumber { values[item] = value.value }
+                }
+            }
+        }
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        let assessment = ProfileMatcher.assess(
+            profile: profile, manufacturer: values, standard: standard)
+        guard assessment.contradicted else { return }
+
+        if isRecording {
+            session.event(.profileDisagreement, [
+                "profile": profile.id,
+                "match": profileMatchMethod,
+                "evidence": assessment.evidence.joined(separator: "; ")
+            ])
+        }
+        notice = "Profile matched by \(profileMatchMethod), but its live data disagrees."
     }
 
     /// VIN and calibration ID, used to decide whether a profile's byte offsets
@@ -270,34 +450,24 @@ final class LiveModel {
         }
     }
 
-    /// "auto" or a profile id. Takes effect on the next connection: the
-    /// protocol, signal list and module headers are fixed at connect time.
-    func selectProfile(_ id: String) {
-        guard id != profileSelection else { return }
-        profileSelection = id
-        UserDefaults.standard.set(id, forKey: "profileSelection")
-        if id != "auto" { loadProfile(id: id) }
-        if isConnected {
-            // Service 0x21 blocks can be decoded immediately with different
-            // offsets; only the protocol and signal list need a reconnect.
-            readings.clearManufacturer()
-            rebuildSignalList()
-            notice = "Profile applied. Reconnect to change protocol or signal list."
+    /// What the app decided and why. Information, not a control: there is no
+    /// way to pick a profile by hand.
+    var profileCaption: String {
+        switch profileMatchMethod {
+        case ProfileResolver.Method.calibration.rawValue:
+            return "\(profileDisplayName(profileID)) · calibration"
+        case ProfileResolver.Method.vin.rawValue:
+            return "\(profileDisplayName(profileID)) · VIN"
+        case ProfileResolver.Method.agreement.rawValue:
+            return "\(profileDisplayName(profileID)) · live data"
+        case ProfileResolver.Method.override.rawValue:
+            return "\(profileDisplayName(profileID)) · override"
+        default:
+            if !manufacturerServiceAvailable || identificationExhausted {
+                return "Standard OBD · no matching profile"
+            }
+            return "Standard OBD · identifying"
         }
-    }
-
-    /// The picker only appears when the app is not sure which profile applies.
-    /// A confident match — calibration, VIN or live agreement — needs no choice.
-    var needsProfileAttention: Bool {
-        profileMatchMethod == "generic" || profileMatchMethod == "assumed"
-    }
-
-    var profileTitle: String {
-        if profileSelection == "auto" {
-            let resolved = availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
-            return isConnected ? "Auto · \(resolved)" : "Auto"
-        }
-        return availableProfiles.first { $0.id == profileID }?.title ?? "Profile"
     }
 
     var isConnected: Bool { phase == .connected }
@@ -407,10 +577,13 @@ final class LiveModel {
                 }
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
-                identity = await readIdentity(using: client)
-                identityResolved = identity.calibrationID != nil || identity.vin != nil
-                await resolveProfile(manufacturerAvailable: manufacturerServiceAvailable,
-                                     identity: identity, using: client)
+                identity = VehicleIdentity()
+                identityResolved = false
+                identificationAttempts = 0
+                identificationExhausted = false
+                disagreementChecked = false
+                profileReason = ""
+                nextIdentificationAt = Date()
 
                 await discoverCapabilities(using: client)
                 rebuildSignalList()
@@ -651,6 +824,16 @@ final class LiveModel {
         if discoveryAtRecordingStart != .succeeded, discovery == .succeeded {
             session.appendNote("Capability discovery did not answer at session start and succeeded once the ECU was awake.")
         }
+        session.updateProfile(
+            id: profileID,
+            hash: profileURL.flatMap { try? Data(contentsOf: $0) }
+                .map(ProfileFingerprint.hash(of:)),
+            match: profileMatchMethod
+        )
+        if profileMatchMethod == ProfileResolver.Method.none.rawValue {
+            let reason = profileReason.isEmpty ? "the vehicle could not be identified" : profileReason
+            session.appendNote("No vehicle profile applied: \(reason)")
+        }
         session.updateOdometer(end: odometerKm)
         let result = session.stop(reason: reason)
         lastSessionEnd = Date()
@@ -878,6 +1061,16 @@ final class LiveModel {
                 }
 
                 if Task.isCancelled { return }
+                if identificationIsDue() {
+                    await attemptIdentification(using: elm)
+                }
+                if (lastRPM ?? 0) > 400, !disagreementChecked,
+                   [ProfileResolver.Method.calibration.rawValue,
+                    ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod) {
+                    await verifyResolvedProfile(using: elm)
+                }
+
+                if Task.isCancelled { return }
                 await stepDTCScan(using: elm)
 
                 if Task.isCancelled { return }
@@ -933,17 +1126,6 @@ final class LiveModel {
             discoveryRetryDone = true
             await discoverCapabilities(using: elm)
             rebuildSignalList()
-        }
-
-        if !identityResolved, !identityRetried {
-            identityRetried = true
-            identity = await readIdentity(using: elm)
-            identityResolved = identity.calibrationID != nil || identity.vin != nil
-            if identityResolved {
-                await resolveProfile(manufacturerAvailable: manufacturerServiceAvailable,
-                                     identity: identity, using: elm)
-                rebuildSignalList()
-            }
         }
 
         feedBatteryMonitor(pid: pid, value: value)

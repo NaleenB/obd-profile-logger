@@ -82,10 +82,8 @@ struct ContentView: View {
                 Text("OBDLogger")
                     .font(.largeTitle.weight(.semibold))
                 Spacer()
-                if model.needsProfileAttention {
-                    profileMenu
-                } else if model.isConnected {
-                    Text(model.profileTitle)
+                if model.isConnected {
+                    Text(model.profileCaption)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -101,39 +99,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var profileMenu: some View {
-        Menu {
-            Button {
-                model.selectProfile("auto")
-            } label: {
-                if model.profileSelection == "auto" {
-                    Label("Automatic", systemImage: "checkmark")
-                } else {
-                    Text("Automatic")
-                }
-            }
-
-            Divider()
-
-            ForEach(model.availableProfiles) { entry in
-                Button {
-                    model.selectProfile(entry.id)
-                } label: {
-                    if entry.id == model.profileSelection {
-                        Label(entry.title, systemImage: "checkmark")
-                    } else {
-                        Text(entry.title)
-                    }
-                }
-            }
-        } label: {
-            Label(model.profileTitle, systemImage: "car")
-                .font(.caption)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 
     private var statusColor: Color {

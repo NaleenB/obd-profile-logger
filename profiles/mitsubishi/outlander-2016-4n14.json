@@ -12,6 +12,33 @@
   "vinPrefixes": [
     "JMFXLGF6W"
   ],
+  "identity": {
+    "probeLIDs": ["01", "02", "03"],
+    "discriminators": [
+      {
+        "itemNumber": 2,
+        "sameAsPID": "0C",
+        "tolerance": 50,
+        "weight": 0.5,
+        "required": true,
+        "minimumStandard": 400
+      },
+      {
+        "itemNumber": 7,
+        "sameAsPID": "05",
+        "tolerance": 5,
+        "weight": 0.3
+      }
+    ],
+    "plausibility": [
+      {
+        "itemNumber": 145,
+        "min": 100,
+        "max": 2000000,
+        "weight": 0.2
+      }
+    ]
+  },
   "service": {
     "readByLocalIdentifier": "21",
     "readByIdentifier": null
