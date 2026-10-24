@@ -138,18 +138,30 @@ public final class SessionRecorder {
             lock.unlock()
             return .alreadyClosed
         }
+        // Closing starts here, and the flag is set under the same lock that
+        // guards writes. A concurrent caller cannot write a sample, or a second
+        // stop event, between the check and the close.
+        closed = true
         lock.unlock()
 
         var problems: [String] = []
 
         do {
-            try recordEvent(.sessionStopped, details: ["reason": reason])
+            let stop = EventRecord(
+                elapsedMs: clock.nowMs(),
+                wallTime: WallClock.iso(),
+                type: .sessionStopped,
+                details: ["reason": reason]
+            )
+            try appendUnchecked(stop, to: eventHandle)
+            lock.lock()
+            eventCount += 1
+            lock.unlock()
         } catch {
             problems.append("stop event: \(error)")
         }
 
         lock.lock()
-        closed = true
         let samples = sampleCount
         let events = eventCount
         lock.unlock()
@@ -192,6 +204,16 @@ public final class SessionRecorder {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { throw RecorderError.alreadyClosed }
+        try write(record, to: handle)
+    }
+
+    /// The stop event is the one record written after `closed` is set, by the
+    /// caller that owns finalisation.
+    private func appendUnchecked<T: Encodable>(_ record: T, to handle: FileHandle) throws {
+        try write(record, to: handle)
+    }
+
+    private func write<T: Encodable>(_ record: T, to handle: FileHandle) throws {
 
         var data = try encoder.encode(record)
         data.append(0x0A)   // newline: exactly one object per line

@@ -65,6 +65,36 @@ final class BatteryMonitorTests: XCTestCase {
         XCTAssertEqual(pre?.severity, .watch)
     }
 
+    /// One monitor models one engine start. Without reset, a second start would
+    /// inherit the first cycle's pre-crank voltage and crank minimum.
+    func testResetStartsAFreshCycle() {
+        let m = BatteryMonitor()
+        feed(m, [
+            (0, 12.3, 0),
+            (400, 10.2, 160),
+            (1200, 9.9, 240),
+            (1900, 14.0, 690),
+            (3000, 14.2, 700)
+        ])
+        XCTAssertEqual(m.report().preCrankVolts, 12.3)
+
+        m.reset()
+        XCTAssertEqual(m.currentPhase, .unknown)
+        XCTAssertNil(m.latestVolts)
+
+        feed(m, [
+            (10_000, 12.6, 0),
+            (10_400, 10.6, 160),
+            (11_200, 10.4, 240),
+            (12_000, 14.1, 700),
+            (14_000, 14.2, 700)
+        ])
+        let second = m.report()
+        XCTAssertEqual(second.preCrankVolts, 12.6)
+        XCTAssertEqual(try XCTUnwrap(second.crankMinimumVolts), 10.4, accuracy: 0.001)
+        XCTAssertEqual(second.verdict, .ok)
+    }
+
     /// A battery that sags below 9 V under load is failing.
     func testFailingCrankIsSuspect() {
         let m = BatteryMonitor()

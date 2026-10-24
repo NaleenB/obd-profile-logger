@@ -157,9 +157,12 @@ public struct DTCScanner {
             outcomes["\(module).monitor"] = .rejected
             return
         }
+        // The monitor-status reply is four data bytes: MIL and DTC count, then
+        // three readiness bytes. Two bytes cannot express readiness, so a short
+        // reply is malformed rather than a usable result.
         guard hex.hasPrefix("4101"),
               let bytes = DTCScanner.bytes(String(hex.dropFirst(4))),
-              bytes.count >= 2
+              bytes.count >= 4
         else {
             outcomes["\(module).monitor"] = .malformed
             return

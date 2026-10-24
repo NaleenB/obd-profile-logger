@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: cd Core && swift test
+
+  probe:
+    name: Probe self-test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: ELM327 parser checks (no adapter required)
+        run: cd Probe && ./run.sh --self-test
+
+  app:
+    name: App builds
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the Xcode project
+        run: cd App && xcodegen generate
+      - name: Build macOS
+        run: |
+          cd App
+          xcodebuild -project OBDLogger.xcodeproj -scheme OBDLogger-macOS \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Build iOS simulator
+        run: |
+          cd App
+          xcodebuild -project OBDLogger.xcodeproj -scheme OBDLogger-iOS \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build

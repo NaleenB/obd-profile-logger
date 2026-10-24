@@ -42,6 +42,32 @@ final class SessionRecorderTests: XCTestCase {
         XCTAssertEqual(read.vehicleProfileID, "mitsubishi-outlander-2016-4n14")
     }
 
+    /// Finalisation is public API, so more than one caller can arrive at once.
+    /// Exactly one may write the stop event and close the handles.
+    func testConcurrentFinishWritesOneStopEvent() throws {
+        let recorder = try SessionStore.createSession(root: root, manifest: manifest())
+
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            _ = recorder.finish(reason: "test")
+        }
+
+        let events = try lines(recorder.directory, SessionRecorder.eventsFilename())
+        let stops = events.filter { $0.contains("\"session_stopped\"") }
+        XCTAssertEqual(stops.count, 1)
+
+        let manifest = try XCTUnwrap(SessionStore.readManifest(at: recorder.directory))
+        XCTAssertNotNil(manifest.finishedAt)
+    }
+
+    /// Once finalisation has begun, a sample must be refused rather than
+    /// appended after the stop event.
+    func testSampleAfterFinishIsRejected() throws {
+        let recorder = try SessionStore.createSession(root: root, manifest: manifest())
+        recorder.finish(reason: "test")
+        XCTAssertThrowsError(try recorder.recordSample(
+            pid: 0x0C, name: "Engine speed", value: 700, unit: "rpm"))
+    }
+
     func testRefusesToReuseASessionID() throws {
         _ = try SessionStore.createSession(root: root, manifest: manifest())
         XCTAssertThrowsError(try SessionStore.createSession(root: root, manifest: manifest())) { error in

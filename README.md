@@ -8,6 +8,7 @@ diesel.
 
 <img src="docs/images/icon.png" width="112" alt="OBDLogger icon">
 
+[![CI](https://github.com/NaleenB/obd-profile-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/NaleenB/obd-profile-logger/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015-lightgrey)]()
 [![Swift](https://img.shields.io/badge/swift-5.9%2B-orange)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)

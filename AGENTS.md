@@ -142,6 +142,10 @@ cd App && ./run.sh               # build and launch the macOS app
 cd App && xcodegen generate      # after editing project.yml
 ```
 
+CI (`.github/workflows/ci.yml`) runs `swift test`, the Probe self-test and both app
+builds on macOS for every push and pull request. It needs no adapter, so a
+regression in parsing, decoding or packaging is caught before hardware.
+
 `deploy-ios.sh` increments the patch version before building, so the version on
 screen always matches the installed build. The build number (`CFBundleVersion`) is
 manual and currently inert.

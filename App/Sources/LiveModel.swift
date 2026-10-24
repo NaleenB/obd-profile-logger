@@ -105,7 +105,8 @@ final class LiveModel {
 
     private var identificationAttempts = 0
     private var nextIdentificationAt: Date?
-    private var disagreementChecked = false
+    private var verificationDone = false
+    private var lastVerificationAttempt = Date.distantPast
     private var profileReason = ""
 
     /// Profiles bundled with the app, used as resolver candidates.
@@ -376,14 +377,16 @@ final class LiveModel {
     }
 
     /// A profile matched by calibration or VIN should still behave like itself.
-    /// One check per session is enough to catch offsets that do not.
+    /// A failed probe is retried: only a completed comparison sets `verified`,
+    /// so one timeout cannot disable the safeguard for the whole session.
     private func verifyResolvedProfile(using elm: ELMClient) async {
-        guard !disagreementChecked,
+        guard !verificationDone,
               manufacturerServiceAvailable,
               let profile, let spec = profile.identity,
-              let rpm = lastRPM, rpm > 400
+              let rpm = lastRPM, rpm > 400,
+              Date().timeIntervalSince(lastVerificationAttempt) >= 30
         else { return }
-        disagreementChecked = true
+        lastVerificationAttempt = Date()
 
         var standard: [UInt8: Double] = [0x0C: rpm]
         if let coolant = await readStandard(0x05, using: elm) {
@@ -402,6 +405,13 @@ final class LiveModel {
             }
         }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
+
+        // Without both sides of the comparison there is nothing to judge. Try
+        // again later rather than calling an unanswered probe a pass.
+        guard ProfileMatcher.hasRequiredEvidence(
+            profile: profile, manufacturer: values, standard: standard)
+        else { return }
+        verificationDone = true
 
         let assessment = ProfileMatcher.assess(
             profile: profile, manufacturer: values, standard: standard)
@@ -581,7 +591,8 @@ final class LiveModel {
                 identityResolved = false
                 identificationAttempts = 0
                 identificationExhausted = false
-                disagreementChecked = false
+                verificationDone = false
+                lastVerificationAttempt = .distantPast
                 profileReason = ""
                 nextIdentificationAt = Date()
 
@@ -590,6 +601,7 @@ final class LiveModel {
 
                 lastVolts = nil
                 lastRPM = nil
+                battery.reset()
                 batteryLogged = false
                 batteryReport = nil
                 runningSince = nil
@@ -830,6 +842,11 @@ final class LiveModel {
                 .map(ProfileFingerprint.hash(of:)),
             match: profileMatchMethod
         )
+        if [ProfileResolver.Method.calibration.rawValue,
+            ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod),
+           manufacturerServiceAvailable, !verificationDone {
+            session.appendNote("Profile matched by \(profileMatchMethod) but could not be verified against live data in this session.")
+        }
         if profileMatchMethod == ProfileResolver.Method.none.rawValue {
             let reason = profileReason.isEmpty ? "the vehicle could not be identified" : profileReason
             session.appendNote("No vehicle profile applied: \(reason)")
@@ -1064,7 +1081,7 @@ final class LiveModel {
                 if identificationIsDue() {
                     await attemptIdentification(using: elm)
                 }
-                if (lastRPM ?? 0) > 400, !disagreementChecked,
+                if (lastRPM ?? 0) > 400, !verificationDone,
                    [ProfileResolver.Method.calibration.rawValue,
                     ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod) {
                     await verifyResolvedProfile(using: elm)

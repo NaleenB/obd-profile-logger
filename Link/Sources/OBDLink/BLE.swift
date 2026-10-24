@@ -69,6 +69,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     private var timeoutItem: DispatchWorkItem?
 
     private var powerCont: CheckedContinuation<Void, Error>?
+    private var powerTimeout: DispatchWorkItem?
+    private var connectTimeout: DispatchWorkItem?
     private var scanCont: CheckedContinuation<[Candidate], Error>?
     private var readyCont: CheckedContinuation<SerialPort, Error>?
 
@@ -106,7 +108,14 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
                 return
             }
             powerCont = cont
+            // CoreBluetooth may simply never report a state. Without a bound the
+            // caller waits forever and a reconnect attempt stays suspended.
+            let item = DispatchWorkItem { [weak self] in
+                self?.failPower(BLEError.unavailable("Bluetooth did not become ready in time"))
+            }
+            powerTimeout = item
             lock.unlock()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: item)
         }
     }
 
@@ -121,6 +130,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.lock()
         let cont = powerCont
         powerCont = nil
+        powerTimeout?.cancel()
+        powerTimeout = nil
         lock.unlock()
 
         switch central.state {
@@ -298,7 +309,14 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<SerialPort, Error>) in
             lock.lock()
             readyCont = cont
+            let item = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.failReady(BLEError.unavailable("connection to \(candidate.name) timed out"))
+                self.central?.cancelPeripheralConnection(peripheral)
+            }
+            connectTimeout = item
             lock.unlock()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: item)
             central.connect(peripheral, options: nil)
         }
     }
@@ -334,6 +352,18 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.lock()
         let cont = readyCont
         readyCont = nil
+        connectTimeout?.cancel()
+        connectTimeout = nil
+        lock.unlock()
+        cont?.resume(throwing: error)
+    }
+
+    private func failPower(_ error: Error) {
+        lock.lock()
+        let cont = powerCont
+        powerCont = nil
+        powerTimeout?.cancel()
+        powerTimeout = nil
         lock.unlock()
         cont?.resume(throwing: error)
     }
@@ -435,6 +465,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.lock()
         let cont = readyCont
         readyCont = nil
+        connectTimeout?.cancel()
+        connectTimeout = nil
         lock.unlock()
         cont?.resume(returning: port)
     }

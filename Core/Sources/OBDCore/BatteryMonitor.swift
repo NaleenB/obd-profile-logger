@@ -79,6 +79,26 @@ public final class BatteryMonitor {
 
     public init() {}
 
+    /// Clears every measurement and the latched phase, for a new engine start.
+    ///
+    /// A monitor models one start. Reusing it would let a second report contain
+    /// the previous cycle's pre-crank voltage or crank minimum.
+    public func reset() {
+        samples.removeAll()
+        phase = .unknown
+        observedCrank = false
+        preCrankVolts = nil
+        preCrankBaseline = nil
+        chargingRecovered = false
+        peakRunningVolts = 0
+        engineStopped = false
+        crankMinimum = nil
+        crankStartMs = nil
+        runningStartMs = nil
+        recoveryMs = nil
+        runningVoltages.removeAll()
+    }
+
     public var currentPhase: BatteryPhase { phase }
     public var latestVolts: Double? { samples.last?.volts }
 

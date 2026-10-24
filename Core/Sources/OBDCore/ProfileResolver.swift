@@ -76,6 +76,12 @@ public enum ProfileResolver {
 
         // 2. VIN prefix. The longest matching prefix wins, so a model-specific
         //    prefix beats a shared manufacturer one.
+        //
+        //    A calibration ID that was *read* and matched nothing is evidence
+        //    against these offsets, not an absent identity. Byte layouts follow
+        //    the ECU software version, so a VIN hit alone must not apply a
+        //    profile to software it was not written for.
+        let calibrationUnrecognised = !(identity.calibrationID ?? "").isEmpty
         if let vin = identity.vin, !vin.isEmpty {
             let matches: [(id: String, length: Int)] = specifics.compactMap { profile in
                 guard let longest = profile.vinPrefixes?
@@ -85,15 +91,21 @@ public enum ProfileResolver {
                 return (profile.id, longest)
             }
             if matches.count == 1 {
-                return Resolution(profileID: matches[0].id, method: .vin,
-                                  reason: "VIN \(vin.prefix(9)) matches this profile.")
+                return vinResolution(
+                    id: matches[0].id,
+                    reason: "VIN \(vin.prefix(9)) matches this profile.",
+                    calibrationUnrecognised: calibrationUnrecognised,
+                    assessments: assessments)
             }
             if matches.count > 1 {
                 let longest = matches.map(\.length).max() ?? 0
                 let winners = matches.filter { $0.length == longest }.map(\.id)
                 if winners.count == 1 {
-                    return Resolution(profileID: winners[0], method: .vin,
-                                      reason: "VIN \(vin.prefix(9)) matches several profiles; the longest prefix wins.")
+                    return vinResolution(
+                        id: winners[0],
+                        reason: "VIN \(vin.prefix(9)) matches several profiles; the longest prefix wins.",
+                        calibrationUnrecognised: calibrationUnrecognised,
+                        assessments: assessments)
                 }
                 if let winner = uniqueBest(winners, assessments) {
                     return Resolution(profileID: winner, method: .vin,
@@ -119,6 +131,25 @@ public enum ProfileResolver {
         }
 
         return .unresolved("The vehicle did not answer a manufacturer service.")
+    }
+
+    /// A VIN match is a weaker claim than it looks when the ECU reported a
+    /// calibration ID that no profile owns. In that case the profile is only
+    /// applied if live data corroborates it.
+    private static func vinResolution(
+        id: String,
+        reason: String,
+        calibrationUnrecognised: Bool,
+        assessments: [ProfileAssessment]
+    ) -> Resolution {
+        guard calibrationUnrecognised else {
+            return Resolution(profileID: id, method: .vin, reason: reason)
+        }
+        if let confirmed = uniqueBest([id], assessments) {
+            return Resolution(profileID: confirmed, method: .vin,
+                              reason: reason + " The calibration ID is unknown, so live data confirmed the layout.")
+        }
+        return .unresolved("VIN matches \(id), but the calibration ID is one this profile does not declare, and live data has not confirmed the layout.")
     }
 
     /// The highest-scoring convincing assessment within a candidate set, but

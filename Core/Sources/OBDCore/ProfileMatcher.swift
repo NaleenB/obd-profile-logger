@@ -37,6 +37,27 @@ public enum ProfileMatcher {
     public static let nearMissFactor = 3.0
     public static let nearMissCredit = 0.35
 
+    /// True when every required discriminator has both a decoded value and a
+    /// reference above its floor, so an assessment would mean something. Used to
+    /// tell "no contradiction found" from "not enough evidence to look".
+    public static func hasRequiredEvidence(
+        profile: VehicleProfile,
+        manufacturer: [Int: Double],
+        standard: [UInt8: Double]
+    ) -> Bool {
+        guard let spec = profile.identity else { return false }
+        let required = spec.discriminators.filter { $0.required == true }
+        guard !required.isEmpty else { return false }
+        return required.allSatisfy { rule in
+            guard let pid = rule.pidValue,
+                  let reference = standard[pid],
+                  reference >= (rule.minimumStandard ?? 0),
+                  manufacturer[rule.itemNumber] != nil
+            else { return false }
+            return true
+        }
+    }
+
     /// - Parameter manufacturer: item number to value, decoded with *this*
     ///   profile. A wrong layout produces plausible-looking numbers here, which
     ///   is exactly why they are checked against independent values.
@@ -61,12 +82,13 @@ public enum ProfileMatcher {
             let required = rule.required == true
 
             guard let pid = rule.pidValue, let reference = standard[pid] else {
-                requiredSatisfied = false
+                // A missing corroborating value must not veto the required test.
+                if required { requiredSatisfied = false }
                 evidence.append("item \(rule.itemNumber): no reference for PID \(rule.sameAsPID)")
                 continue
             }
             if let floor = rule.minimumStandard, reference < floor {
-                requiredSatisfied = false
+                if required { requiredSatisfied = false }
                 evidence.append(String(format: "item %d: %.0f is below the %.0f comparison floor",
                                        rule.itemNumber, reference, floor))
                 continue

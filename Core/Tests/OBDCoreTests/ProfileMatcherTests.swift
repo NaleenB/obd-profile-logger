@@ -5,7 +5,11 @@ final class ProfileMatcherTests: XCTestCase {
 
     /// Engine speed is required; coolant corroborates; the odometer is a
     /// plausibility check with no reference value.
-    private func fixture(required: Bool = true) throws -> VehicleProfile {
+    private func fixture(required: Bool = true, optionalFloor: Double? = nil) throws -> VehicleProfile {
+        var coolant: [String: Any] = [
+            "itemNumber": 7, "sameAsPID": "05", "tolerance": 5, "weight": 0.3
+        ]
+        if let optionalFloor { coolant["minimumStandard"] = optionalFloor }
         let dictionary: [String: Any] = [
             "schemaVersion": 1,
             "id": "test-profile",
@@ -21,7 +25,7 @@ final class ProfileMatcherTests: XCTestCase {
                 "discriminators": [
                     ["itemNumber": 2, "sameAsPID": "0C", "tolerance": 50,
                      "weight": 0.5, "required": required, "minimumStandard": 400],
-                    ["itemNumber": 7, "sameAsPID": "05", "tolerance": 5, "weight": 0.3]
+                    coolant
                 ],
                 "plausibility": [
                     ["itemNumber": 145, "min": 100, "max": 2_000_000, "weight": 0.2]
@@ -111,6 +115,42 @@ final class ProfileMatcherTests: XCTestCase {
             standard: standard)
         XCTAssertEqual(assessment.score, 0.5, accuracy: 0.001)
         XCTAssertTrue(assessment.convincing)
+    }
+
+    /// A corroborating value that cannot be read must not veto the required
+    /// test. Coolant is optional: losing it costs its weight, nothing more.
+    func testMissingOptionalReferenceDoesNotVetoAgreement() throws {
+        let assessment = ProfileMatcher.assess(
+            profile: try fixture(),
+            manufacturer: [2: 650, 7: 59],
+            standard: [0x0C: 650])
+        XCTAssertTrue(assessment.convincing)
+        XCTAssertEqual(assessment.score, 0.5, accuracy: 0.001)
+    }
+
+    /// The same applies when an optional discriminator declares a floor the
+    /// reading does not reach.
+    func testOptionalReferenceBelowItsFloorDoesNotVetoAgreement() throws {
+        let assessment = ProfileMatcher.assess(
+            profile: try fixture(optionalFloor: 80),
+            manufacturer: [2: 650, 7: 20],
+            standard: [0x0C: 650, 0x05: 20])
+        XCTAssertTrue(assessment.convincing)
+    }
+
+    /// "No contradiction" and "no evidence to judge" are different states, and
+    /// profile verification depends on being able to tell them apart.
+    func testRequiredEvidenceNeedsBothSides() throws {
+        let profile = try fixture()
+        XCTAssertTrue(ProfileMatcher.hasRequiredEvidence(
+            profile: profile, manufacturer: [2: 650], standard: [0x0C: 650]))
+        XCTAssertFalse(ProfileMatcher.hasRequiredEvidence(
+            profile: profile, manufacturer: [2: 650], standard: [0x0C: 0]),
+            "engine off is not usable evidence")
+        XCTAssertFalse(ProfileMatcher.hasRequiredEvidence(
+            profile: profile, manufacturer: [:], standard: [0x0C: 650]))
+        XCTAssertFalse(ProfileMatcher.hasRequiredEvidence(
+            profile: profile, manufacturer: [2: 650], standard: [:]))
     }
 
     /// A profile with no identity block cannot be matched by live data at all.

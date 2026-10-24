@@ -60,6 +60,46 @@ final class ProfileResolverTests: XCTestCase {
         XCTAssertEqual(result.method, .vin)
     }
 
+    /// A calibration ID that was read and matched nothing is evidence against
+    /// these offsets, not a missing identity. A VIN hit alone must not override
+    /// it.
+    func testUnknownCalibrationBlocksVinOnlySelection() throws {
+        let profiles = [try makeProfile(id: "a", calibrationIDs: ["KNOWN"],
+                                        vinPrefixes: ["JMFXLGF6W"])]
+        let result = ProfileResolver.resolve(
+            candidates: profiles,
+            identity: VehicleIdentity(vin: "JMFXLGF6WHZ000651", calibrationID: "OTHER"),
+            manufacturerAvailable: true)
+        XCTAssertNil(result.profileID)
+        XCTAssertEqual(result.method, .none)
+        XCTAssertTrue(result.reason.lowercased().contains("calibration"), result.reason)
+    }
+
+    /// With the calibration unrecognised, live data may still prove the layout.
+    func testUnknownCalibrationWithMatchingVinNeedsAgreement() throws {
+        let profiles = [try makeProfile(id: "a", calibrationIDs: ["KNOWN"],
+                                        vinPrefixes: ["JMFXLGF6W"])]
+        let result = ProfileResolver.resolve(
+            candidates: profiles,
+            identity: VehicleIdentity(vin: "JMFXLGF6WHZ000651", calibrationID: "OTHER"),
+            manufacturerAvailable: true,
+            assessments: [convincing("a")])
+        XCTAssertEqual(result.profileID, "a")
+        XCTAssertEqual(result.method, .vin)
+    }
+
+    /// An unreadable calibration leaves the VIN route open.
+    func testMissingCalibrationUsesVinDirectly() throws {
+        let profiles = [try makeProfile(id: "a", calibrationIDs: ["KNOWN"],
+                                        vinPrefixes: ["JMFXLGF6W"])]
+        let result = ProfileResolver.resolve(
+            candidates: profiles,
+            identity: VehicleIdentity(vin: "JMFXLGF6WHZ000651"),
+            manufacturerAvailable: true)
+        XCTAssertEqual(result.profileID, "a")
+        XCTAssertEqual(result.method, .vin)
+    }
+
     /// The longest matching prefix is more specific than a shorter one.
     func testLongestVinPrefixWins() throws {
         let profiles = [
