@@ -169,6 +169,7 @@ public enum SessionEventType: String, Codable {
     case recordingInterrupted = "recording_interrupted"
     case sweepCompleted = "sweep_completed"
     case profileChanged = "profile_changed"
+    case startupTiming = "startup_timing"
     case profileDisagreement = "profile_disagreement"
     case regenStarted = "regen_started"
     case regenEnded = "regen_ended"

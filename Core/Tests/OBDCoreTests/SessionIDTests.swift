@@ -61,4 +61,32 @@ final class SessionIDTests: XCTestCase {
         let ids = SessionStore.summaries(root: root).map(\.id)
         XCTAssertEqual(ids, ["20000101-000000-bbbb", "20990101-000000-aaaa"])
     }
+
+    /// A session whose manifest cannot be read has no timestamp. It must not be
+    /// sorted against ISO strings as text; place it after the dated sessions.
+    func testUnreadableManifestSortsLast() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("obd-ids-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let readable = SessionManifest(
+            sessionID: "20000101-000000-bbbb",
+            startedAt: "2026-10-24T07:43:18.964Z",
+            appVersion: "test")
+        let broken = SessionManifest(
+            sessionID: "29990101-000000-cccc",
+            startedAt: "2026-10-25T07:43:18.964Z",
+            appVersion: "test")
+
+        let readableRecorder = try SessionStore.createSession(root: root, manifest: readable)
+        readableRecorder.finish(reason: "test")
+
+        let brokenRecorder = try SessionStore.createSession(root: root, manifest: broken)
+        brokenRecorder.finish(reason: "test")
+        try Data("not a manifest".utf8).write(
+            to: brokenRecorder.directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+
+        XCTAssertEqual(SessionStore.summaries(root: root).map(\.id).last, broken.sessionID)
+    }
 }

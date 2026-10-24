@@ -77,7 +77,10 @@ final class LiveModel {
     private let watchdog = IdleWatchdog(timeout: 600)
     /// When a command is outstanding. A request whose continuation never resumes
     /// leaves this set, which is how a suspended-then-resumed link is detected.
-    private var inFlightSince: Date?
+    private var lastLoopTick: Date?
+    private var didInitialReads = false
+    private var connectStartedAt: Date?
+    private var engineStoppedSince: Date?
     private var regenDetector = RegenDetector()
     private var regenSootAtStart: Double?
     private var stallWatchdog: Task<Void, Never>?
@@ -556,14 +559,30 @@ final class LiveModel {
 
         pollTask = Task { [weak self] in
             guard let self else { return }
+            let started = Date()
+            connectStartedAt = started
             do {
                 try await transport.start()
-                let candidate = try await transport.findAdapter(scanSeconds: 8, nameFilter: nil)
+                let bluetoothMs = Date().timeIntervalSince(started) * 1000
+
+                // The adapter that worked last time is connected directly; a
+                // scan is the fallback, not the default.
+                var candidate = try await transport.findAdapter(scanSeconds: 8, nameFilter: nil)
+                let adapterMs = Date().timeIntervalSince(started) * 1000
                 status = "Connecting to \(candidate.name.isEmpty ? "adapter" : candidate.name)…"
 
-                let port = try await transport.connect(candidate)
+                var port: SerialPort
+                do {
+                    port = try await transport.connect(candidate)
+                } catch {
+                    // A remembered peripheral can go stale; rescan once.
+                    candidate = try await transport.findAdapter(
+                        scanSeconds: 6, nameFilter: nil, preferKnown: false)
+                    port = try await transport.connect(candidate)
+                }
                 _ = port
                 KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
+                let bleMs = Date().timeIntervalSince(started) * 1000
 
                 let client = ELMClient(transport: transport, logger: nil)
                 elm = client
@@ -585,6 +604,7 @@ final class LiveModel {
                 } else {
                     _ = try? await client.send("ATSP0", timeout: 3)
                 }
+                let elmMs = Date().timeIntervalSince(started) * 1000
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
                 identity = VehicleIdentity()
@@ -596,7 +616,9 @@ final class LiveModel {
                 profileReason = ""
                 nextIdentificationAt = Date()
 
+                let discoveryStarted = Date()
                 await discoverCapabilities(using: client)
+                let discoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
                 rebuildSignalList()
 
                 lastVolts = nil
@@ -607,6 +629,8 @@ final class LiveModel {
                 runningSince = nil
                 discoveryRetryDone = false
                 gapMonitor = DataGapMonitor(threshold: 10)
+                didInitialReads = false
+                engineStoppedSince = nil
 
                 connectedAt = Date()
                 phase = .connected
@@ -617,17 +641,26 @@ final class LiveModel {
                 }
                 _ = protocolAccepted
 
-                // Read DPF once for immediate display. Recording is usually not
-                // active yet; the profile sweep records these same LIDs when it is.
-                await readDPF()
+                // Only what the manifest needs before recording. The initial DPF
+                // read and trip snapshot wait for the first successful sample:
+                // while the ECU is asleep those requests each burn their timeout,
+                // which is how a cold start spent half a minute before showing
+                // anything.
                 odometerKm = await readOdometer(using: client)
                 ambientTempC = await readAmbient(using: client)
 
                 // Recording is automatic: connecting is the intent to record.
-                // Start it first so the connection event is not discarded.
                 startRecording()
                 session.event(.adapterConnected, ["adapter": adapterName])
-                await captureTripSnapshot(phase: "start", using: client)
+                session.event(.startupTiming, [
+                    "phase": "connected",
+                    "bluetoothMs": Self.millis(bluetoothMs),
+                    "adapterMs": Self.millis(adapterMs),
+                    "bleMs": Self.millis(bleMs),
+                    "elmMs": Self.millis(elmMs),
+                    "discoveryMs": Self.millis(discoveryMs),
+                    "totalMs": Self.millis(Date().timeIntervalSince(started) * 1000)
+                ])
                 startPolling()
             } catch {
                 phase = .failed("\(error)")
@@ -645,7 +678,6 @@ final class LiveModel {
         pollTask = nil
         transport.shutdown()
         elm = nil
-        inFlightSince = nil
         readings.clear()
         dpf = nil
         lastRPM = nil
@@ -911,6 +943,22 @@ final class LiveModel {
 
         battery.ingest(VoltageSample(atMs: batteryClock.nowMs(), volts: volts, rpm: lastRPM))
 
+        // A new start inside one connection is a new cycle. The monitor latches
+        // "running", so without this the next crank would never be measured.
+        if battery.currentPhase == .running, (lastRPM ?? 0) < 400 {
+            if engineStoppedSince == nil { engineStoppedSince = Date() }
+            if let since = engineStoppedSince,
+               Date().timeIntervalSince(since) > 5,
+               batteryLogged {
+                battery.reset()
+                batteryLogged = false
+                runningSince = nil
+                engineStoppedSince = nil
+            }
+        } else {
+            engineStoppedSince = nil
+        }
+
         guard battery.currentPhase == .running else { return }
         if runningSince == nil { runningSince = Date() }
 
@@ -961,7 +1009,7 @@ final class LiveModel {
         var found: Set<UInt8> = []
         for base in PIDCapabilities.probePIDs {
             let command = String(format: "01%02X", base)
-            guard let reply = try? await elm.send(command, timeout: 6),
+            guard let reply = try? await elm.send(command, timeout: 2),
                   let hex = reply.payloadHex,
                   let supported = PIDCapabilities.supported(fromHex: hex, base: base)
             else { continue }
@@ -1001,33 +1049,38 @@ final class LiveModel {
         timeout: TimeInterval,
         using elm: ELMClient
     ) async -> ELMResponse? {
-        inFlightSince = Date()
-        defer { inFlightSince = nil }
-        return try? await elm.send(command, timeout: timeout)
+        try? await elm.send(command, timeout: timeout)
     }
 
-    /// A command outstanding for far longer than its own timeout means the link
-    /// is wedged — usually after the phone was suspended mid-request.
+    /// A poll loop that has not completed an iteration for a minute is wedged,
+    /// whatever command it is inside. Watching the loop rather than one wrapped
+    /// call covers discovery, identification, DTC scanning and sweep traffic too.
     func checkForStall(now: Date = Date()) {
-        guard phase == .connected, let started = inFlightSince else { return }
-        guard now.timeIntervalSince(started) > 20 else { return }
+        guard phase == .connected, let last = lastLoopTick else { return }
+        guard now.timeIntervalSince(last) > 60 else { return }
         recoverFromStall()
     }
 
+    /// A wedged link is not the end of a drive: the session stays open and the
+    /// reconnect path picks it up, exactly as it does for a dropped link.
     private func recoverFromStall() {
-        notice = "Connection stalled and was reset. Tap Connect to resume."
-        status = "Connection stalled"
-        if isRecording { stopRecording(reason: "stalled") }
+        notice = "Connection stalled; reconnecting."
+        status = "Reconnecting…"
         stallWatchdog?.cancel()
         stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
         transport.shutdown()
         elm = nil
-        inFlightSince = nil
+        lastLoopTick = nil
         readings.clear()
         dpf = nil
-        phase = .failed("Connection stalled")
+        if isRecording {
+            beginReconnect()
+        } else {
+            phase = .failed("Connection stalled")
+            status = "Connection stalled"
+        }
     }
 
     /// Called when the app returns to the foreground: iOS may have suspended a
@@ -1039,6 +1092,7 @@ final class LiveModel {
     // MARK: - Polling
 
     private func startPolling() {
+        lastLoopTick = Date()
         stallWatchdog?.cancel()
         stallWatchdog = Task { [weak self] in
             while !Task.isCancelled {
@@ -1097,6 +1151,24 @@ final class LiveModel {
 
                 if Task.isCancelled { return }
                 await stepProfileScan(using: elm)
+
+                // One-time enrichment, once the bus is actually answering. Doing
+                // this before polling was what delayed the first live reading.
+                if !didInitialReads, isRecording, let last = lastUpdate,
+                   Date().timeIntervalSince(last) < 5 {
+                    didInitialReads = true
+                    await readDPF()
+                    await captureTripSnapshot(phase: "start", using: elm)
+                    if let connectStartedAt {
+                        session.event(.startupTiming, [
+                            "phase": "first_sample",
+                            "sinceConnectMs": Self.millis(
+                                Date().timeIntervalSince(connectStartedAt) * 1000)
+                        ])
+                    }
+                }
+
+                lastLoopTick = Date()
 
                 if case .failed = recording {
                     // A write failure has stopped the session; keep sampling for
@@ -1351,7 +1423,7 @@ final class LiveModel {
     private func readOdometer(using elm: ELMClient) async -> Int? {
         guard let profile else { return nil }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
-        let reply = try? await elm.send("2103", timeout: 3)
+        let reply = try? await elm.send("2103", timeout: 2)
         _ = try? await elm.send("ATSH7DF", timeout: 2)
         guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return nil }
         return profile.decode(frame)
@@ -1362,7 +1434,7 @@ final class LiveModel {
     /// Intake air temperature with the engine off, as an ambient proxy: this ECU
     /// has no ambient-temperature PID.
     private func readAmbient(using elm: ELMClient) async -> Double? {
-        guard let reply = try? await elm.send("010F", timeout: 3),
+        guard let reply = try? await elm.send("010F", timeout: 2),
               let hex = reply.payloadHex, hex.hasPrefix("410F"),
               let bytes = LiveModel.bytes(String(hex.dropFirst(4))),
               let first = bytes.first
@@ -1424,6 +1496,10 @@ final class LiveModel {
     }
 
     // MARK: - Helpers
+
+    private static func millis(_ value: Double) -> String {
+        String(Int(value.rounded()))
+    }
 
     /// Shown in the UI so a screenshot identifies the build.
     var versionDescription: String {

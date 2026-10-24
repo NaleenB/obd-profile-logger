@@ -70,8 +70,15 @@ public extension SessionStore {
             )
         }
         return all.sorted { lhs, rhs in
-            // A manifest that cannot be read falls back to its name.
-            (lhs.startedAt ?? lhs.id) > (rhs.startedAt ?? rhs.id)
+            // Compare real timestamps only. A name is not a timestamp, so a
+            // session with an unreadable manifest is placed after the dated ones
+            // rather than sorted against them as text.
+            switch (lhs.startedAt, rhs.startedAt) {
+            case let (left?, right?): return left > right
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.id > rhs.id
+            }
         }
     }
 }

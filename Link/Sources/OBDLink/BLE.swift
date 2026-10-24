@@ -124,6 +124,19 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         if let peripheral, peripheral.state != .disconnected {
             central?.cancelPeripheralConnection(peripheral)
         }
+
+        // A shutdown must unblock everything that is waiting. Relying on a
+        // timeout that may itself have been suspended leaves the caller hanging.
+        failReady(BLEError.notConnected)
+        failPower(BLEError.unavailable("Bluetooth was shut down"))
+
+        lock.lock()
+        let waiting = pending
+        pending = nil
+        timeoutItem?.cancel()
+        timeoutItem = nil
+        lock.unlock()
+        waiting?.resume(throwing: BLEError.notConnected)
     }
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -198,7 +211,31 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         cont?.resume(returning: list)
     }
 
-    public func findAdapter(scanSeconds: TimeInterval, nameFilter: String?) async throws -> Candidate {
+    /// The adapter that worked last time, retrieved by identifier without a
+    /// scan. Returns nil when CoreBluetooth no longer knows it.
+    public func knownAdapter() -> Candidate? {
+        guard let central,
+              let known = KnownAdapter.load(),
+              let peripheral = central.retrievePeripherals(withIdentifiers: [known.uuid]).first
+        else { return nil }
+        return Candidate(peripheral: peripheral,
+                         name: known.name.isEmpty ? (peripheral.name ?? "OBD adapter") : known.name,
+                         score: 100,
+                         rssi: 0,
+                         detail: "previously connected adapter")
+    }
+
+    public func findAdapter(
+        scanSeconds: TimeInterval,
+        nameFilter: String?,
+        preferKnown: Bool = true
+    ) async throws -> Candidate {
+        // Remembering the adapter should save the scan, not merely pick from its
+        // results: a repeat connection has no reason to wait eight seconds.
+        if preferKnown, (nameFilter ?? "").isEmpty, let known = knownAdapter() {
+            return known
+        }
+
         let list = try await scan(seconds: scanSeconds)
 
         // A previously working adapter is the strongest possible signal: these

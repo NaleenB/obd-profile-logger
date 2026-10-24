@@ -105,7 +105,13 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 `adapter_disconnected`, `adapter_reconnected`, `recording_interrupted`,
 `battery_test`, `data_gap`, `data_resumed`, `regen_started`, `regen_ended`,
 `sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `profile_changed`,
-`profile_disagreement`, `error`.
+`profile_disagreement`, `startup_timing`, `error`.
+
+`startup_timing` records where connection time went: Bluetooth ready, adapter
+discovery (or direct retrieval of the known adapter), BLE setup, ELM
+initialisation, capability discovery, and — in a second event — the time from
+starting the connection to the first live sample. It exists because "the phone
+connects slowly" is otherwise unfalsifiable.
 
 `profile_changed` marks the boundary where a vehicle profile was applied. The app
 starts on generic OBD and may identify the car while recording, once the ECU wakes

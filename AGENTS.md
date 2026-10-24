@@ -188,6 +188,13 @@ Each of these has already caused a wrong conclusion.
   measured on this car.
 - **Two session events can mean one trip.** A dropped link now reconnects and
   continues the same session; do not assume a new session means a new drive.
+- **A cold start used to spend ~28 s before the first sample**, because the DPF
+  read and trip snapshot ran before polling. They now wait for the first
+  successful sample. If startup is slow again, check `startup_timing` events
+  before guessing: a slow scan and a slow ECU look identical without them.
+- **One battery report per engine cycle, not per connection.** The monitor resets
+  after the engine has been stopped for five seconds, so a restart in the same
+  connection is measured again.
 
 ## Status — what is proven
 
