@@ -9,6 +9,9 @@ import Foundation
 ///
 /// Both bands are deliberately tight. A wide window would produce values that
 /// look comparable and are not, which is worse than recording nothing.
+///
+/// Not yet wired into the app or Probe; this is groundwork for the baseline
+/// learning feature. Its tests validate this detector, not the shipped dashboard.
 public struct ReferencePointDetector {
 
     public struct Reference: Equatable {

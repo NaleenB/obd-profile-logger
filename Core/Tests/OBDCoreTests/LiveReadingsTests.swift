@@ -71,6 +71,21 @@ final class LiveReadingsTests: XCTestCase {
         XCTAssertTrue(readings.isEmpty)
     }
 
+    /// A failed PID must age independently. The stream's last update stays
+    /// fresh while another PID answers, which previously made every tile look
+    /// current.
+    func testFreshnessIsTrackedPerSignal() {
+        var readings = LiveReadings()
+        let start = Date(timeIntervalSince1970: 1_000)
+        readings.setStandard(pid: "0C", value: 650, at: start)
+        readings.setStandard(pid: "05", value: 45, at: start.addingTimeInterval(30))
+
+        let now = start.addingTimeInterval(34)
+        XCTAssertTrue(readings.isStandardStale("0C", now: now, after: 5))
+        XCTAssertFalse(readings.isStandardStale("05", now: now, after: 5))
+        XCTAssertFalse(readings.isStale(now: now, after: 40))
+    }
+
     func testStalenessUsesLastUpdate() {
         var readings = LiveReadings()
         XCTAssertTrue(readings.isStale(now: now, after: 5), "no data is stale by definition")

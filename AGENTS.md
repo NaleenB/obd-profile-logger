@@ -135,16 +135,21 @@ field — bump the version when a field's meaning changes, not when one is added
 ## Build, test, deploy
 
 ```bash
-cd Core && swift test            # the only tests that exist
-cd Probe && ./run.sh --self-test # ELM327 parser checks, no car needed
+cd Core && swift test            # domain, recorder and profile tests
+cd Link && swift test            # ELM327 response parser tests
+cd Probe && swift test           # Probe safety tests, no car needed
+cd Probe && ./run.sh --self-test # parser checks; exits non-zero on failure
 cd App && ./run.sh               # build and launch the macOS app
 ./tools/deploy-ios.sh            # bump version, build, install to iPhone
 cd App && xcodegen generate      # after editing project.yml
 ```
 
-CI (`.github/workflows/ci.yml`) runs `swift test`, the Probe self-test and both app
-builds on macOS for every push and pull request. It needs no adapter, so a
-regression in parsing, decoding or packaging is caught before hardware.
+CI (`.github/workflows/ci.yml`) runs Core, Link and Probe tests, the Probe
+self-test and both app builds on macOS for every push and pull request. It needs
+no adapter, so a regression in parsing, decoding, profile validation or packaging
+is caught before hardware. The App coordinator itself still has no automated
+target; connection-generation logic is covered in Core and must be exercised on
+hardware.
 
 `deploy-ios.sh` increments the patch version before building, so the version on
 screen always matches the installed build. The build number (`CFBundleVersion`) is
@@ -230,6 +235,17 @@ Each of these has already caused a wrong conclusion.
   does not answer until the car is identified, so it typically arrives after
   recording starts; without it there is no soot-per-km or regen interval. A
   failed read does not restart the 60 s timer, so a cold ECU is retried promptly.
+- **Manufacturer roles belong to the profile, not the app.** Highlights, priority
+  blocks, trip snapshots, odometer and DPF meanings are declared under `roles`.
+  A profile without them simply exposes less; it is never decoded with another
+  vehicle's hard-coded offsets.
+- **Probe only sweeps read services.** `21`, `22` and `1A` are allow-listed in
+  both argument handling and the sweep itself. Never widen that list to include
+  write, actuator or routine-control services.
+- **A profile is validated before use.** The loader rejects malformed lengths,
+  duplicate LIDs, invalid identity references and `observed` evidence that does
+  not match the emitted scaling. A profile that cannot be interpreted safely is
+  not allowed to become trusted data.
 
 ## Status — what is proven
 
@@ -237,12 +253,17 @@ Verified on the car: standard recording, manufacturer decode, DPF values, inject
 learning, rail pressure, turbo boost, DTC scanning on both ECUs, battery test, ZIP
 export, locked-screen background recording on the iPhone.
 
+`ReferencePointDetector` and the general `HealthEvaluator` paths are retained for
+baseline learning but are not wired into the shipped dashboard; their tests are
+not evidence about app behaviour.
+
 Not yet observed: the 10-minute idle disconnect, the 10-minute reconnect window,
 regeneration detection against a real regeneration, quiet mode past its entry
 (silence is announced and the loop degrades as designed, but the car has not yet
 been watched waking back out of it), and the reconnect fallback on a stale
 peripheral — that path was duplicated from the manual connect, not induced on the
-phone.
+phone. Connection generations are unit-tested, but superseded BLE callbacks have
+not been forced on hardware.
 
 ## Conventions
 

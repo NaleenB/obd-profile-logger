@@ -59,6 +59,38 @@ final class SessionRecorderTests: XCTestCase {
         XCTAssertNotNil(manifest.finishedAt)
     }
 
+    /// A sample already written to disk must already be in the final count.
+    /// Incrementing the counter after releasing the write lock allowed finish()
+    /// to snapshot a manifest that undercounted its own file.
+    func testConcurrentSamplesAndFinishKeepTheManifestCountTruthful() throws {
+        for index in 0..<20 {
+            let id = "20260101-1200\(String(format: "%02d", index))-abcd"
+            let recorder = try SessionStore.createSession(root: root, manifest: manifest(id))
+
+            let group = DispatchGroup()
+            DispatchQueue.global().async(group: group) {
+                for sample in 0..<100 {
+                    _ = try? recorder.recordSample(
+                        pid: 0x0C,
+                        name: "Engine speed",
+                        value: Double(sample),
+                        unit: "rpm")
+                }
+            }
+            DispatchQueue.global().async(group: group) {
+                _ = recorder.finish(reason: "race")
+            }
+            XCTAssertEqual(group.wait(timeout: .now() + 10), .success)
+
+            let written = try lines(recorder.directory, SessionRecorder.samplesFilename()).count
+            let manifest = try XCTUnwrap(SessionStore.readManifest(at: recorder.directory))
+            let counted = try XCTUnwrap(
+                manifest.notes.first { $0.hasPrefix("sampleCount=") }
+            ).dropFirst("sampleCount=".count)
+            XCTAssertEqual(Int(counted), written)
+        }
+    }
+
     /// Once finalisation has begun, a sample must be refused rather than
     /// appended after the stop event.
     func testSampleAfterFinishIsRejected() throws {
@@ -429,3 +461,53 @@ final class ExportAllTests: XCTestCase {
         XCTAssertEqual(before, after, "staging directories must not accumulate")
     }
 }
+
+
+#if os(macOS)
+private extension FileManager {
+    func unzipItem(at source: URL, to destination: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-x", "-k", source.path, destination.path]
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw SessionArchive.ArchiveTestError.failed("could not read archive")
+        }
+    }
+}
+
+extension SessionArchive {
+    enum ArchiveTestError: Error { case failed(String) }
+
+    static func entryNames(of archive: URL) throws -> [String] {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unzip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try FileManager.default.unzipItem(at: archive, to: destination)
+        let enumerator = FileManager.default.enumerator(
+            at: destination, includingPropertiesForKeys: [.isDirectoryKey])
+        var names: [String] = []
+        while let item = enumerator?.nextObject() as? URL {
+            if (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { continue }
+            names.append(item.lastPathComponent)
+        }
+        return names.sorted()
+    }
+
+    static func entryPaths(of archive: URL) throws -> [String] {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unzip-all-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try FileManager.default.unzipItem(at: archive, to: destination)
+        let enumerator = FileManager.default.enumerator(
+            at: destination, includingPropertiesForKeys: [.isDirectoryKey])
+        var paths: [String] = []
+        while let item = enumerator?.nextObject() as? URL {
+            paths.append(item.path.replacingOccurrences(of: destination.path + "/", with: ""))
+        }
+        return paths.sorted()
+    }
+}
+#endif

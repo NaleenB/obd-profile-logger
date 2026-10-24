@@ -195,6 +195,9 @@ public enum VehicleSpec {
     }
 }
 
+/// General health rules retained for baseline learning. The shipping app uses
+/// `BatteryMonitor` and profile-decoded values; `evaluateIdle`, `evaluateRunning`
+/// and `evaluateBattery` are not yet presented by the app.
 public enum HealthEvaluator {
 
     /// Idle-only checks. Caller decides when the car is actually idling.

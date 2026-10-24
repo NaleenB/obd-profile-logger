@@ -6,6 +6,8 @@ import Foundation
 /// write failure cannot leave the UI claiming everything is fine. A failed
 /// sample write stops the session immediately: continuing would produce a log
 /// with invisible holes.
+/// Not internally synchronised: the app owns it on the main actor, while
+/// `SessionRecorder` underneath is safe for concurrent writes and finalisation.
 public final class RecordingSession {
 
     public enum State: Equatable {
@@ -20,7 +22,6 @@ public final class RecordingSession {
     public private(set) var lastFinalize: FinalizeResult?
 
     private var recorder: SessionRecorder?
-    private let lock = NSLock()
 
     public init() {}
 

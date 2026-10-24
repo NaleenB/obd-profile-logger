@@ -90,6 +90,10 @@ final class LiveModel {
     private var stallWatchdog: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var connectedAt: Date?
+    /// Changes whenever a connection attempt or poll session is superseded.
+    /// Cancellation is cooperative; this identity is what stops an old request
+    /// from committing state after its continuation finally returns.
+    private var connectionEpoch = ConnectionEpoch()
     /// Decides when silence becomes a message and when it becomes a cheaper loop.
     private let silence = SilenceWatchdog()
     /// Voltage at the adapter, readable with the ignition off. Only meaningful
@@ -173,7 +177,7 @@ final class LiveModel {
 
     /// Asks the car what it is. This is the only route to a manufacturer
     /// profile: there is no setting and no assumption.
-    private func attemptIdentification(using elm: ELMClient) async {
+    private func attemptIdentification(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         guard overrideProfileID == nil,
               profileMatchMethod == ProfileResolver.Method.none.rawValue else { return }
 
@@ -181,10 +185,14 @@ final class LiveModel {
         // that was asleep at connect can start answering later, and without
         // this re-check the agreement route would stay unavailable.
         if !manufacturerServiceAvailable {
-            manufacturerServiceAvailable = await detectManufacturerService(using: elm)
+            let available = await detectManufacturerService(using: elm)
+            guard isCurrent(generation) else { return }
+            manufacturerServiceAvailable = available
         }
         if !identityResolved {
-            identity = await readIdentity(using: elm)
+            let read = await readIdentity(using: elm)
+            guard isCurrent(generation) else { return }
+            identity = read
             identityResolved = identity.calibrationID != nil || identity.vin != nil
         }
 
@@ -199,6 +207,7 @@ final class LiveModel {
             resolution = await resolveByAgreement(using: elm) ?? resolution
         }
 
+        guard isCurrent(generation) else { return }
         profileReason = resolution.reason
         apply(resolution)
 
@@ -220,6 +229,7 @@ final class LiveModel {
         let referencedPIDs = Set(candidateProfiles.compactMap(\.identity)
             .flatMap { $0.discriminators.compactMap(\.pidValue) })
         for pid in referencedPIDs {
+            guard !Task.isCancelled else { return (standard, decoded) }
             if let value = await readStandard(pid, using: elm) {
                 standard[pid] = value
             }
@@ -231,6 +241,7 @@ final class LiveModel {
         var frames: [UInt8: MUT21Frame] = [:]
         _ = try? await elm.send("ATSH7E0", timeout: 2)
         for lid in probeLIDs.sorted() {
+            guard !Task.isCancelled else { return (standard, decoded) }
             if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
                let hex = reply.payloadHex,
                let frame = MUT21Frame(hex: hex) {
@@ -269,6 +280,7 @@ final class LiveModel {
         var resolution: ProfileResolver.Resolution?
 
         for round in 0..<Self.agreementProbes {
+            guard !Task.isCancelled else { return resolution }
             let evidence = await gatherEvidence(using: elm)
             let current = assess(evidence)
             for assessment in current {
@@ -404,7 +416,7 @@ final class LiveModel {
     /// A profile matched by calibration or VIN should still behave like itself.
     /// A failed probe is retried: only a completed comparison sets `verified`,
     /// so one timeout cannot disable the safeguard for the whole session.
-    private func verifyResolvedProfile(using elm: ELMClient) async {
+    private func verifyResolvedProfile(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         guard !verificationDone,
               manufacturerServiceAvailable,
               let profile, let spec = profile.identity,
@@ -421,6 +433,7 @@ final class LiveModel {
         var values: [Int: Double] = [:]
         _ = try? await elm.send("ATSH7E0", timeout: 2)
         for lid in spec.lidValues {
+            guard !Task.isCancelled else { return }
             if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
                let hex = reply.payloadHex,
                let frame = MUT21Frame(hex: hex) {
@@ -431,6 +444,7 @@ final class LiveModel {
         }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
 
+        guard isCurrent(generation) else { return }
         // Without both sides of the comparison there is nothing to judge. Try
         // again later rather than calling an unanswered probe a pass.
         guard ProfileMatcher.hasRequiredEvidence(
@@ -497,14 +511,10 @@ final class LiveModel {
         return hex.hasPrefix("6111")
     }
 
-    /// Profile ids are dotted and human-readable; bundle resources are the short
-    /// file names.
+    /// Profile ids are dotted and human-readable; bundle resources are shorter
+    /// file names. The catalogue owns that mapping.
     private func resourceName(for id: String) -> String {
-        switch id {
-        case "mitsubishi-outlander-2016-4n14": return "outlander-2016-4n14"
-        case "generic-iso15765-can": return "iso15765-can"
-        default: return id
-        }
+        ProfileCatalog.resourceName(for: id) ?? id
     }
 
     /// What the app decided and why. Information, not a control: there is no
@@ -549,6 +559,14 @@ final class LiveModel {
     }
     var isRecording: Bool { recording.isRecording }
 
+    func isStandardStale(_ pid: String, now: Date = Date()) -> Bool {
+        readings.isStandardStale(pid, now: now, after: 5)
+    }
+
+    func isManufacturerStale(_ parameter: DecodedParameter, now: Date = Date()) -> Bool {
+        readings.isManufacturerStale(parameter, now: now, after: 10)
+    }
+
     var manufacturerHighlights: [DecodedParameter] {
         guard let profile else { return [] }
         return profile.highlights(from: Array(manufacturer.values))
@@ -590,6 +608,18 @@ final class LiveModel {
 
     // MARK: - Connection
 
+    private func newConnectionGeneration() -> ConnectionEpoch.Token {
+        connectionEpoch.advance()
+    }
+
+    private func invalidateConnection() {
+        connectionEpoch.advance()
+    }
+
+    private func isCurrent(_ generation: ConnectionEpoch.Token) -> Bool {
+        connectionEpoch.isValid(generation) && !Task.isCancelled
+    }
+
     func connect() {
         guard phase != .connected, phase != .connecting else { return }
         cancelReconnect()
@@ -600,9 +630,10 @@ final class LiveModel {
         }
         phase = .connecting
         status = "Scanning for adapter…"
+        let generation = newConnectionGeneration()
 
         pollTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.isCurrent(generation) else { return }
             let started = Date()
             connectStartedAt = started
             do {
@@ -614,6 +645,7 @@ final class LiveModel {
                 // scan is the fallback, not the default.
                 status = "Scanning for adapter…"
                 let link = try await connectAdapter(scanSeconds: 8)
+                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
                 let candidate = link.candidate
                 status = "Configuring adapter…"
                 KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
@@ -642,6 +674,7 @@ final class LiveModel {
                 let elmMs = Date().timeIntervalSince(elmBegan) * 1000
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
+                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
                 identity = VehicleIdentity()
                 identityResolved = false
                 identificationAttempts = 0
@@ -653,6 +686,7 @@ final class LiveModel {
 
                 let discoveryStarted = Date()
                 await discoverCapabilities(using: client)
+                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
                 let capabilityDiscoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
                 rebuildSignalList()
 
@@ -681,9 +715,12 @@ final class LiveModel {
                 // while the ECU is asleep those requests each burn their timeout,
                 // which is how a cold start spent half a minute before showing
                 // anything.
-                odometerKm = await readOdometer(using: client)
-                ambientTempC = await readAmbient(using: client)
-                odometerStartKm = odometerKm
+                let startOdometer = await readOdometer(using: client)
+                let ambient = await readAmbient(using: client)
+                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
+                odometerKm = startOdometer
+                ambientTempC = ambient
+                odometerStartKm = startOdometer
 
                 // Recording is automatic: connecting is the intent to record.
                 startRecording()
@@ -701,8 +738,11 @@ final class LiveModel {
                     "capabilityDiscoveryMs": Self.millis(capabilityDiscoveryMs),
                     "totalMs": Self.millis(Date().timeIntervalSince(started) * 1000)
                 ].merging(manufacturerProbeTimings) { current, _ in current })
-                startPolling()
+                startPolling(generation: generation)
             } catch {
+                guard self.isCurrent(generation) else { return }
+                self.transport.shutdown()
+                self.elm = nil
                 phase = .failed("\(error)")
                 status = "\(error)"
             }
@@ -714,6 +754,9 @@ final class LiveModel {
     private func handleTransportDisconnect(_ reason: String) {
         guard !intentionalDisconnect else { return }
 
+        invalidateConnection()
+        stallWatchdog?.cancel()
+        stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
         // The scan in progress belongs to the link that just died; resuming it
@@ -776,6 +819,10 @@ final class LiveModel {
                 rescanned: false
             )
         } catch {
+            // The failed candidate may still own delegate callbacks or a
+            // half-open GATT connection. Release it before scanning so the
+            // retry cannot inherit that state.
+            transport.disconnect()
             let rescanStarted = Date()
             let fresh = try await transport.findAdapter(
                 scanSeconds: scanSeconds, nameFilter: nil, preferKnown: false)
@@ -800,14 +847,15 @@ final class LiveModel {
         guard reconnectTask == nil else { return }
         phase = .reconnecting
         status = "Reconnecting…"
+        let generation = newConnectionGeneration()
 
         reconnectTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.isCurrent(generation) else { return }
             let deadline = Date().addingTimeInterval(600)
             var attempt = 0
             var delay: UInt64 = 2_000_000_000
 
-            while !Task.isCancelled, Date() < deadline {
+            while self.isCurrent(generation), Date() < deadline {
                 attempt += 1
                 self.status = "Reconnecting… (attempt \(attempt))"
 
@@ -818,6 +866,10 @@ final class LiveModel {
                     // retried for ten minutes while the dongle sits there
                     // advertising under a new identity.
                     let link = try await self.connectAdapter(scanSeconds: 6)
+                    guard self.isCurrent(generation) else {
+                        self.transport.shutdown()
+                        return
+                    }
                     let candidate = link.candidate
 
                     let client = ELMClient(transport: self.transport, logger: nil)
@@ -826,6 +878,10 @@ final class LiveModel {
                     _ = try? await client.send("ATH0", timeout: 2)
                     if let protocolValue = self.profile?.elmProtocol {
                         _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
+                    }
+                    guard self.isCurrent(generation) else {
+                        self.transport.shutdown()
+                        return
                     }
 
                     self.elm = client
@@ -840,7 +896,7 @@ final class LiveModel {
                         "adapterRescanned": link.rescanned ? "true" : "false"
                     ])
                     self.gapMonitor = DataGapMonitor(threshold: 10)
-                    self.startPolling()
+                    self.startPolling(generation: generation)
                     self.reconnectTask = nil
                     return
                 } catch {
@@ -850,7 +906,7 @@ final class LiveModel {
                 }
             }
 
-            guard !Task.isCancelled else { return }
+            guard self.isCurrent(generation) else { return }
             self.stopRecording(reason: "reconnect_timeout")
             self.phase = .failed("Adapter disconnected")
             self.status = "Adapter disconnected"
@@ -870,13 +926,15 @@ final class LiveModel {
 
     func disconnect(reason: DisconnectReason = .user) {
         intentionalDisconnect = true
+        invalidateConnection()
         cancelReconnect()
+        stallWatchdog?.cancel()
+        stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
 
         session.event(.adapterDisconnected, ["reason": reason.rawValue])
         if isRecording {
-            reportGapTransition(gapMonitor.finish(now: Date(), reason: .recordingStopped))
             stopRecording(reason: reason.rawValue)
         }
         connectedAt = nil
@@ -918,10 +976,9 @@ final class LiveModel {
             odometerStartKm: odometerStartKm ?? odometerKm,
             ambientTempC: ambientTempC,
             coldSoakHours: soak,
-            notes: [
-                "Standard PIDs plus service 0x21 manufacturer observations.",
-                "DTC scans cover the engine (7E0) and transmission (7E1) only."
-            ]
+            notes: profileMatchMethod == ProfileResolver.Method.none.rawValue
+                ? ["Recording started before vehicle identification completed."]
+                : []
         )
 
         do {
@@ -985,6 +1042,15 @@ final class LiveModel {
             session.appendNote("No vehicle profile applied: \(reason)")
         }
         session.updateOdometer(start: odometerStartKm, end: odometerKm)
+        let moduleNames = dtcTargets.map(\.module).joined(separator: ", ")
+        if !moduleNames.isEmpty {
+            session.appendNote("DTC scans targeted \(moduleNames).")
+        }
+        if profile?.service.readByLocalIdentifier != nil {
+            session.appendNote(manufacturerServiceAvailable
+                ? "Manufacturer service 0x21 answered during this session."
+                : "Manufacturer service 0x21 did not answer during this session.")
+        }
         let result = session.stop(reason: reason)
         lastSessionEnd = Date()
         UserDefaults.standard.set(lastSessionEnd, forKey: "lastSessionEnd")
@@ -1018,14 +1084,19 @@ final class LiveModel {
         stopRecording(reason: "app_quit")
     }
 
-    func exportLastSession() {
+    func exportLastSession() async {
         guard let directory = lastSessionURL else {
             notice = "No session to export yet."
             return
         }
         do {
+            // ZIP creation copies and compresses the whole directory. Keeping it
+            // on the main actor blocks the live dashboard for the duration.
+            let created = try await Task.detached(priority: .userInitiated) {
+                try SessionArchive.export(directory)
+            }.value
             if let existing = exportURL { SessionArchive.discard(existing) }
-            exportURL = try SessionArchive.export(directory)
+            exportURL = created
             exportedSessionID = directory.lastPathComponent
         } catch {
             notice = "\(error)"
@@ -1154,15 +1225,6 @@ final class LiveModel {
         }
     }
 
-    /// Wraps a command so a request that never returns is detectable.
-    private func send(
-        _ command: String,
-        timeout: TimeInterval,
-        using elm: ELMClient
-    ) async -> ELMResponse? {
-        try? await elm.send(command, timeout: timeout)
-    }
-
     /// A poll loop that has not completed an iteration for a minute is wedged,
     /// whatever command it is inside. Watching the loop rather than one wrapped
     /// call covers discovery, identification, DTC scanning and sweep traffic too.
@@ -1177,6 +1239,7 @@ final class LiveModel {
     private func recoverFromStall() {
         notice = "Connection stalled; reconnecting."
         status = "Reconnecting…"
+        invalidateConnection()
         stallWatchdog?.cancel()
         stallWatchdog = nil
         pollTask?.cancel()
@@ -1250,21 +1313,22 @@ final class LiveModel {
 
     // MARK: - Polling
 
-    private func startPolling() {
+    private func startPolling(generation: ConnectionEpoch.Token) {
         lastLoopTick = Date()
+        pollTask?.cancel()
         stallWatchdog?.cancel()
         stallWatchdog = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard let self else { return }
-                await self.checkForStall()
+                self.checkForStall()
             }
         }
 
         pollTask = Task { [weak self] in
             guard let self, let elm else { return }
 
-            while !Task.isCancelled {
+            while self.isCurrent(generation) {
                 // The car going quiet is judged on every iteration, from the
                 // last sample and not from a success: measuring silence inside
                 // the success path always read zero, so a sleeping ECU left no
@@ -1275,10 +1339,11 @@ final class LiveModel {
                 let quiet = silence.shouldPollQuietly(now: Date(), reference: reference)
 
                 if quiet {
-                    await quietCycle(using: elm)
+                    await quietCycle(using: elm, generation: generation)
                 } else {
-                    await sampleCycle(using: elm)
+                    await sampleCycle(using: elm, generation: generation)
                 }
+                guard self.isCurrent(generation) else { return }
 
                 lastLoopTick = Date()
 
@@ -1304,28 +1369,27 @@ final class LiveModel {
                     return
                 }
 
-                iteration += 1
             }
         }
     }
 
     /// One full pass: every live signal, then the periodic extra work.
-    private func sampleCycle(using elm: ELMClient) async {
+    private func sampleCycle(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         // Manufacturer and DTC work address modules directly; restore
         // broadcast before sampling so live values keep their meaning.
         _ = try? await elm.send("ATSH7DF", timeout: 2)
 
         for signal in signals {
-            if Task.isCancelled { return }
-            await sample(signal, using: elm)
+            guard isCurrent(generation) else { return }
+            await sample(signal, using: elm, generation: generation)
         }
 
         // A crank lasts one to two seconds. While the engine is off,
         // sample voltage a second time per cycle so the dip is caught.
         if (lastRPM ?? 0) < 400,
            let voltage = signals.first(where: { $0.pid == "42" }) {
-            if Task.isCancelled { return }
-            await sample(voltage, using: elm)
+            guard isCurrent(generation) else { return }
+            await sample(voltage, using: elm, generation: generation)
         }
 
         if isRecording,
@@ -1334,7 +1398,9 @@ final class LiveModel {
             // regardless meant a cold ECU that answered a moment later was not
             // read again for a minute, and the start odometer could be lost for
             // the whole session.
-            if let reading = await readOdometer(using: elm) {
+            let reading = await readOdometer(using: elm)
+            guard isCurrent(generation) else { return }
+            if let reading {
                 lastOdometerRead = Date()
                 recordOdometer(reading)
             } else if Date().timeIntervalSince(lastOdometerRead) > 300 {
@@ -1343,41 +1409,41 @@ final class LiveModel {
             }
         }
 
-        if Task.isCancelled { return }
+        guard isCurrent(generation) else { return }
         if identificationIsDue() {
-            await attemptIdentification(using: elm)
+            await attemptIdentification(using: elm, generation: generation)
         }
+        guard isCurrent(generation) else { return }
         if (lastRPM ?? 0) > 400, !verificationDone,
            [ProfileResolver.Method.calibration.rawValue,
             ProfileResolver.Method.vin.rawValue].contains(profileMatchMethod) {
-            await verifyResolvedProfile(using: elm)
+            await verifyResolvedProfile(using: elm, generation: generation)
         }
 
-        if Task.isCancelled { return }
-        await stepDTCScan(using: elm)
+        guard isCurrent(generation) else { return }
+        await stepDTCScan(using: elm, generation: generation)
 
-        if Task.isCancelled { return }
-        await stepPriorityScan(using: elm)
-        if Task.isCancelled { return }
-        await stepPriorityScan(using: elm)
+        guard isCurrent(generation) else { return }
+        await stepPriorityScan(using: elm, generation: generation)
 
-        if Task.isCancelled { return }
-        await stepProfileScan(using: elm)
+        guard isCurrent(generation) else { return }
+        await stepProfileScan(using: elm, generation: generation)
 
         // One-time enrichment, once the bus is actually answering. Doing
         // this before polling was what delayed the first live reading.
-        if !didInitialReads, isRecording, let last = lastUpdate,
-           Date().timeIntervalSince(last) < 5 {
+        if !didInitialReads, isRecording, let firstSampleAt = lastUpdate,
+           Date().timeIntervalSince(firstSampleAt) < 5 {
             didInitialReads = true
-            await readDPF()
-            await captureTripSnapshot(phase: "start", using: elm)
+            // Measure the metric this event promises before enrichment adds
+            // DPF and trip-snapshot round trips.
             if let connectStartedAt {
                 session.event(.startupTiming, [
                     "phase": "first_sample",
                     "sinceConnectMs": Self.millis(
-                        Date().timeIntervalSince(connectStartedAt) * 1000)
+                        firstSampleAt.timeIntervalSince(connectStartedAt) * 1000)
                 ])
             }
+            await captureTripSnapshot(phase: "start", using: elm, generation: generation)
         }
     }
 
@@ -1388,30 +1454,34 @@ final class LiveModel {
     /// to a real PID is what proves the car has woken, and a successful read
     /// returns the loop to the full cycle by itself. Without that probe, quiet
     /// mode would be a one-way door.
-    private func quietCycle(using elm: ELMClient) async {
+    private func quietCycle(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         // The sweep may have left a module header selected.
         _ = try? await elm.send("ATSH7DF", timeout: 2)
 
         if let reply = try? await elm.send("ATRV", timeout: 2) {
+            guard isCurrent(generation) else { return }
             supplyVolts = reply.supplyVolts
         }
 
         guard let rpm = signals.first(where: { $0.pid == "0C" }) else { return }
-        await sample(rpm, using: elm)
+        await sample(rpm, using: elm, generation: generation)
     }
 
-    private var iteration = 0
-
     /// One live signal. A failed read writes nothing: absence is meaningful.
-    private func sample(_ signal: VehicleProfile.StandardSignal, using elm: ELMClient) async {
+    private func sample(
+        _ signal: VehicleProfile.StandardSignal,
+        using elm: ELMClient,
+        generation: ConnectionEpoch.Token
+    ) async {
         guard let pid = signal.pidValue else { return }
         let command = String(format: "01%02X", pid)
-        guard let reply = await send(command, timeout: 2, using: elm),
+        guard let reply = try? await elm.send(command, timeout: 2),
               let hex = reply.payloadHex,
               hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4))),
               let value = signal.decode(data)
         else { return }
+        guard isCurrent(generation) else { return }
 
         readings.setStandard(pid: signal.pid, value: value, at: Date())
 
@@ -1420,6 +1490,7 @@ final class LiveModel {
         if discovery == .failed, !discoveryRetryDone {
             discoveryRetryDone = true
             await discoverCapabilities(using: elm)
+            guard isCurrent(generation) else { return }
             rebuildSignalList()
         }
 
@@ -1442,7 +1513,7 @@ final class LiveModel {
     /// One scanner request per loop, with the target header selected immediately
     /// before it. The header must not be assumed to persist: live sampling
     /// resets addressing between steps.
-    private func stepDTCScan(using elm: ELMClient) async {
+    private func stepDTCScan(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         if scanner == nil {
             guard Date().timeIntervalSince(lastDTCStep) >= dtcScanInterval else { return }
             let targets = dtcTargets
@@ -1464,14 +1535,14 @@ final class LiveModel {
             // Cancellation during the wait means the link is gone and the scan
             // is being abandoned. Committing the step anyway would leave a
             // partial result to be resumed after reconnection.
-            if Task.isCancelled { return }
+            guard isCurrent(generation) else { return }
             guard headerReply?.isOK == true else {
                 active.ingestHeaderFailure()
                 scanner = active
                 return
             }
             let reply = try? await elm.send(request.command, timeout: 3)
-            if Task.isCancelled { return }
+            guard isCurrent(generation) else { return }
             active.ingest(responseHex: reply?.payloadHex)
             scanner = active
         }
@@ -1506,37 +1577,43 @@ final class LiveModel {
 
     // MARK: - Manufacturer data
 
-    /// The live block: exhaust, catalyst and DPF temperatures plus differential
-    /// pressure. Once per loop so a loaded drive actually characterises the
-    /// sensor instead of sampling it every 90 seconds.
-    private static let priorityLID: UInt8 = 0x10
+    /// Live blocks refreshed every cycle, as declared by the vehicle profile.
+    private func stepPriorityScan(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
+        guard let profile, !profile.priorityLIDs.isEmpty else { return }
+        for lid in profile.priorityLIDs {
+            guard isCurrent(generation) else { return }
+            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            guard isCurrent(generation) else { return }
+            let command = String(format: "21%02X", lid)
+            let reply = try? await elm.send(command, timeout: 3)
+            guard isCurrent(generation) else { return }
+            guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { continue }
 
-    private func stepPriorityScan(using elm: ELMClient) async {
-        guard let profile, profile.localIdentifiers.contains(Self.priorityLID) else { return }
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
-        let reply = try? await elm.send("2110", timeout: 3)
-        guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return }
-
-        for decoded in profile.decode(frame) {
-            readings.setManufacturer(decoded, at: Date())
-            if decoded.itemNumber == 119 { trackRegeneration(dpfTemperature: decoded.value) }
-            if isRecording {
-                let written = session.manufacturerSample(
-                    lid: decoded.lid,
-                    itemNumber: decoded.itemNumber,
-                    name: decoded.name,
-                    value: decoded.value,
-                    unit: decoded.unit,
-                    raw: hex
-                )
-                if !written { syncRecordingState() }
+            let decodedValues = profile.decode(frame)
+            for decoded in decodedValues {
+                readings.setManufacturer(decoded, at: Date())
+                if isRecording {
+                    let written = session.manufacturerSample(
+                        lid: decoded.lid,
+                        itemNumber: decoded.itemNumber,
+                        name: decoded.name,
+                        value: decoded.value,
+                        unit: decoded.unit,
+                        raw: hex
+                    )
+                    if !written { syncRecordingState() }
+                }
             }
+            if let temperature = profile.roles?.dpfTemperature?.value(in: decodedValues) {
+                trackRegeneration(dpfTemperature: temperature)
+            }
+            refreshDPFSummary()
         }
     }
 
     /// One local identifier per loop, so 76 blocks refresh in the background
     /// without blocking live sampling.
-    private func stepProfileScan(using elm: ELMClient) async {
+    private func stepProfileScan(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         guard let profile, !profile.localIdentifiers.isEmpty else { return }
         let count = profile.localIdentifiers.count
         let lid = profile.localIdentifiers[profileIndex % count]
@@ -1558,9 +1635,13 @@ final class LiveModel {
         // Recorded before the request: a timeout is still an attempt.
         sweep.recordAttempt(lid)
 
+        guard isCurrent(generation) else { return }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
+        guard isCurrent(generation) else { return }
         let command = String(format: "21%02X", lid)
-        guard let reply = try? await elm.send(command, timeout: 3),
+        let reply = try? await elm.send(command, timeout: 3)
+        guard isCurrent(generation) else { return }
+        guard let reply,
               let hex = reply.payloadHex,
               let frame = MUT21Frame(hex: hex)
         else { return }
@@ -1582,17 +1663,24 @@ final class LiveModel {
                 if !written { syncRecordingState() }
             }
         }
+        refreshDPFSummary()
     }
 
     /// Everything a future comparison needs, captured once at each end of a
     /// session so regen interval and soot-per-km become measurable rather than
     /// inferred.
-    private func captureTripSnapshot(phase: String, using elm: ELMClient) async {
+    private func captureTripSnapshot(
+        phase: String,
+        using elm: ELMClient,
+        generation: ConnectionEpoch.Token
+    ) async {
         guard let profile else { return }
         var details: [String: String] = ["phase": phase]
 
-        for lid in [UInt8(0x03), 0x10, 0x11, 0x12] {
+        for lid in profile.tripSnapshotLIDs {
+            guard isCurrent(generation) else { return }
             _ = try? await elm.send("ATSH7E0", timeout: 2)
+            guard isCurrent(generation) else { return }
             guard let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
                   let hex = reply.payloadHex,
                   let frame = MUT21Frame(hex: hex)
@@ -1606,6 +1694,7 @@ final class LiveModel {
             }
         }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
+        guard isCurrent(generation) else { return }
 
         if let odometerKm { details["odometerKm"] = String(odometerKm) }
         if let ambientTempC { details["ambientTempC"] = String(format: "%.1f", ambientTempC) }
@@ -1629,17 +1718,21 @@ final class LiveModel {
         session.event(.tripSnapshot, details)
     }
 
-    /// Odometer from the engine ECU (item 145). Needed because regeneration
-    /// interval and soot-per-km are otherwise not computable.
+    /// Odometer from the profile's declared odometer role. Needed because
+    /// regeneration interval and soot-per-km are otherwise not computable.
     private func readOdometer(using elm: ELMClient) async -> Int? {
-        guard let profile else { return nil }
+        guard let profile,
+              let role = profile.roles?.odometer,
+              let lid = role.lidValue
+        else { return nil }
+        guard !Task.isCancelled else { return nil }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
-        let reply = try? await elm.send("2103", timeout: 2)
+        guard !Task.isCancelled else { return nil }
+        let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 2)
+        guard !Task.isCancelled else { return nil }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
         guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return nil }
-        return profile.decode(frame)
-            .first { $0.itemNumber == 145 }
-            .map { Int($0.value) }
+        return role.value(in: profile.decode(frame)).map(Int.init)
     }
 
     /// Records an odometer reading and, the first time one arrives, writes it
@@ -1664,13 +1757,46 @@ final class LiveModel {
         return Double(first) - 40
     }
 
+    /// Rebuilds the DPF summary from profile-decoded live values.
+    ///
+    /// This replaced a second, hard-coded decoder. A profile without DPF roles
+    /// simply shows no DPF summary.
+    private func refreshDPFSummary() {
+        guard let roles = profile?.roles else {
+            dpf = nil
+            return
+        }
+        let sootByAccumulation = roles.sootByAccumulation?
+            .value(in: manufacturer.values)
+        let sootByPressure = roles.sootByPressure?
+            .value(in: manufacturer.values)
+        let count = roles.regenerationCount?.value(in: manufacturer.values)
+        let mode: RegenerationMode? = roles.regenerationMode?
+            .value(in: manufacturer.values)
+            .map { $0 == 0 ? .notRequested : .unknown(raw: Int($0)) }
+
+        guard sootByAccumulation != nil || sootByPressure != nil
+                || count != nil || mode != nil
+        else {
+            dpf = nil
+            return
+        }
+        dpf = DPFStatus(
+            sootByAccumulation: sootByAccumulation,
+            sootByPressure: sootByPressure,
+            regenerationCount: count.map(Int.init),
+            regenerationMode: mode
+        )
+    }
+
     /// Regeneration is detected from the filter temperature rather than the ECU's
     /// flag: the temperature lives in the live block at several Hz, while the flag
     /// block refreshes once a minute and a half.
     private func trackRegeneration(dpfTemperature: Double) {
         switch regenDetector.ingest(tempC: dpfTemperature, at: Date()) {
         case .started(let temp):
-            regenSootAtStart = manufacturer.values.first { $0.itemNumber == 155 }?.value
+            regenSootAtStart = profile?.roles?.sootByAccumulation?
+                .value(in: manufacturer.values)
             var details: [String: String] = ["dpfTempC": String(format: "%.0f", temp)]
             if let soot = regenSootAtStart { details["sootBeforeGL"] = String(format: "%.2f", soot) }
             if let odometerKm { details["odometerKm"] = String(odometerKm) }
@@ -1682,7 +1808,8 @@ final class LiveModel {
                 "peakTempC": String(format: "%.0f", peak)
             ]
             if let soot = regenSootAtStart { details["sootBeforeGL"] = String(format: "%.2f", soot) }
-            if let after = manufacturer.values.first(where: { $0.itemNumber == 155 })?.value {
+            if let after = profile?.roles?.sootByAccumulation?
+                .value(in: manufacturer.values) {
                 details["sootAfterGL"] = String(format: "%.2f", after)
             }
             if let before = regenSootAtStart {
@@ -1698,24 +1825,8 @@ final class LiveModel {
 
     // MARK: - DPF
 
-    private func readDPF() async {
-        guard let elm else { return }
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
-        var frames: [UInt8: MUT21Frame] = [:]
-        for lid in [UInt8(0x11), 0x12] {
-            let command = String(format: "21%02X", lid)
-            guard let reply = try? await elm.send(command, timeout: 6),
-                  let hex = reply.payloadHex,
-                  let frame = MUT21Frame(hex: hex)
-            else { continue }
-            frames[lid] = frame
-        }
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
-        let status = MUT21.status(from: frames)
-        if status.sootByAccumulation != nil || status.regenerationCount != nil {
-            dpf = status
-        }
-    }
+    /// The DPF summary is derived from the profile-decoded live block below.
+    /// There is deliberately no second, hard-coded Outlander decoder here.
 
     // MARK: - Helpers
 

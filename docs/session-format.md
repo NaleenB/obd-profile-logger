@@ -11,7 +11,7 @@ OBDLogger/Sessions/<yyyyMMdd-HHmmss>-<4 hex>/
   manifest.json
   samples.ndjson
   events.ndjson
-  profile.json      the decoding rules used, copied in at session start
+  profile.json      the decoding rules used; replaced when a profile resolves
 ```
 
 Session IDs are the recording device's local time plus a random suffix, so a
@@ -31,7 +31,8 @@ a single `OBDLogger-sessions/` root and archives that.
 
 ## manifest.json
 
-Written at start, rewritten at stop with `finishedAt` and counts.
+Written at start, rewritten whenever profile, discovery or odometer state
+changes, and rewritten at stop with `finishedAt` and counts.
 
 | Field | Meaning |
 |---|---|
@@ -156,7 +157,7 @@ answering while recording continued — usually ignition off. The adapter stays
 connected in that case, because OBD pin 16 is permanent battery power and the
 dongle never loses power; only the ECU sleeps.
 
-A gap ends for exactly one of two reasons, and they are different events.
+A gap ends in one of two ways, and they are different events.
 `data_resumed` means a sample from the vehicle arrived. `data_gap_ended` means
 the gap closed for any other reason, and carries `reason`: `link_down` (the
 Bluetooth link dropped), `stalled` (the polling loop was reset) or
@@ -183,12 +184,13 @@ last ones the car gave — they are never refreshed or zeroed to fill the gap.
 `adapter_connected` is written after the session starts, so it always appears.
 
 `regen_started` and `regen_ended` bracket a DPF regeneration. Detection uses the
-filter temperature from the live block (above 450 °C starts, below 300 °C for ten
-seconds ends) rather than the ECU's own flag, because the flag sits in a block
-that refreshes once per ~90 s sweep while the temperature is sampled several
-times a second. `regen_ended` carries the duration, peak temperature, and the soot
-figure before and after where available. A regeneration still running when the
-session ends is closed with `truncated: true` rather than dropped.
+filter temperature from the profile's declared live block (above 450 °C starts,
+below 300 °C for ten seconds ends) rather than the ECU's own flag, because the
+flag sits in a block that refreshes once per ~90 s sweep while the temperature is
+sampled several times a second. `regen_ended` carries the duration, peak
+temperature, and the profile-declared soot figure before and after where
+available. A regeneration still running when the session ends is closed with
+`truncated: true` rather than dropped.
 
 When the link drops during a recording, the session is **not** closed. The app
 records `adapter_disconnected`, closes any open gap with `data_gap_ended` and
@@ -257,7 +259,7 @@ gone. Export is unaffected because it only ever reads the source.
 `SessionArchive.exportAll` does the same for several sessions at once: it stages
 copies under a single root folder and archives that, so the result is
 `OBDLogger-sessions/<session>/…` rather than a scatter of sibling directories.
-Sources are only read. The session currently being recorded is excluded, because
-a partial session in a shared archive invites wrong conclusions. The source directory is only read. The UI
-shares that ZIP through the system share sheet and discards the temporary copy
-afterwards.
+Sources are only read. The session currently being recorded is excluded from
+both single and multi-session export, because a partial session in a shared
+archive invites wrong conclusions. The UI shares the ZIP through the system share
+sheet and discards the temporary copy afterwards.

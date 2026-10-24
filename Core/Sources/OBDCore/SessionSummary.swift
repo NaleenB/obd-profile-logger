@@ -2,7 +2,7 @@ import Foundation
 
 /// A recorded session as shown in a list. Cheap to build: it reads the manifest
 /// and counts lines rather than loading the data.
-public struct SessionSummary: Identifiable, Equatable {
+public struct SessionSummary: Identifiable, Equatable, Sendable {
     public let directory: URL
     public let startedAt: String?
     public let finished: Bool

@@ -35,16 +35,22 @@ public struct LiveReadings: Equatable {
     public private(set) var values: [String: Double] = [:]
     public private(set) var manufacturer: [String: DecodedParameter] = [:]
     public private(set) var lastUpdate: Date?
+    /// Freshness belongs to each observation, not to the stream. One PID can
+    /// stop answering while every other PID keeps the dashboard looking live.
+    public private(set) var standardUpdatedAt: [String: Date] = [:]
+    public private(set) var manufacturerUpdatedAt: [String: Date] = [:]
 
     public init() {}
 
     public mutating func setStandard(pid: String, value: Double, at date: Date) {
         values[pid] = value
+        standardUpdatedAt[pid] = date
         lastUpdate = date
     }
 
     public mutating func setManufacturer(_ parameter: DecodedParameter, at date: Date) {
         manufacturer[parameter.id] = parameter
+        manufacturerUpdatedAt[parameter.id] = date
         lastUpdate = date
     }
 
@@ -53,6 +59,8 @@ public struct LiveReadings: Equatable {
     public mutating func clear() {
         values.removeAll()
         manufacturer.removeAll()
+        standardUpdatedAt.removeAll()
+        manufacturerUpdatedAt.removeAll()
         lastUpdate = nil
     }
 
@@ -60,10 +68,25 @@ public struct LiveReadings: Equatable {
     /// profile changes mid-session and old values would be wrong.
     public mutating func clearManufacturer() {
         manufacturer.removeAll()
+        manufacturerUpdatedAt.removeAll()
     }
 
     public var isEmpty: Bool {
         values.isEmpty && manufacturer.isEmpty && lastUpdate == nil
+    }
+
+    public func isStandardStale(_ pid: String, now: Date, after interval: TimeInterval) -> Bool {
+        guard let at = standardUpdatedAt[pid] else { return true }
+        return now.timeIntervalSince(at) > interval
+    }
+
+    public func isManufacturerStale(
+        _ parameter: DecodedParameter,
+        now: Date,
+        after interval: TimeInterval
+    ) -> Bool {
+        guard let at = manufacturerUpdatedAt[parameter.id] else { return true }
+        return now.timeIntervalSince(at) > interval
     }
 
     /// True when nothing has arrived for `interval`, so the UI can say so rather

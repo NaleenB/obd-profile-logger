@@ -87,57 +87,6 @@ public enum SessionArchive {
         try? FileManager.default.removeItem(at: url)
     }
 
-    #if os(macOS)
-    /// Lists archive entries by name. Test helper; macOS only, so the library
-    /// still builds for iOS without `Process`.
-    public static func entryNames(of archive: URL) throws -> [String] {
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("unzip-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: destination) }
-
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: archive.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue
-        else {
-            throw ArchiveError.failed("archive not found")
-        }
-
-        // `FileManager.unzipItem` is available on macOS 10.15+/iOS 13+ via
-        // Foundation's archive support.
-        try FileManager.default.unzipItem(at: archive, to: destination)
-
-        let enumerator = FileManager.default.enumerator(
-            at: destination,
-            includingPropertiesForKeys: [.isDirectoryKey]
-        )
-        var names: [String] = []
-        while let item = enumerator?.nextObject() as? URL {
-            if (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { continue }
-            names.append(item.lastPathComponent)
-        }
-        return names.sorted()
-    }
-    /// Relative paths of every entry, including directories. Lets a test assert
-    /// that each session folder survived the round trip.
-    public static func entryPaths(of archive: URL) throws -> [String] {
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("unzip-all-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: destination) }
-
-        try FileManager.default.unzipItem(at: archive, to: destination)
-
-        let enumerator = FileManager.default.enumerator(
-            at: destination,
-            includingPropertiesForKeys: [.isDirectoryKey]
-        )
-        var paths: [String] = []
-        while let item = enumerator?.nextObject() as? URL {
-            let relative = item.path.replacingOccurrences(of: destination.path + "/", with: "")
-            paths.append(relative)
-        }
-        return paths.sorted()
-    }
-    #endif
 }
 
 public enum ArchiveError: Error, CustomStringConvertible, Equatable {
@@ -151,21 +100,3 @@ public enum ArchiveError: Error, CustomStringConvertible, Equatable {
         }
     }
 }
-
-#if os(macOS)
-private extension FileManager {
-    /// `unzipItem` is provided by Foundation on Apple platforms; declared here so
-    /// the call site reads clearly.
-    func unzipItem(at source: URL, to destination: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", source.path, destination.path]
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw ArchiveError.failed("could not read archive (status \(process.terminationStatus))")
-        }
-    }
-}
-#endif

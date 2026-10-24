@@ -10,6 +10,7 @@ struct ContentView: View {
     /// Drives the age of the last reading. It has to be a clock on this side:
     /// when the car stops answering, nothing else on screen changes.
     @State private var now = Date()
+    @State private var preparingExport = false
     @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [GridItem(.adaptive(minimum: 132), spacing: 12)]
@@ -26,6 +27,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
                             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                            .opacity(silent ? 0.45 : 1)
                     }
 
                     if model.signals.isEmpty {
@@ -39,7 +41,7 @@ struct ContentView: View {
                                 Tile(
                                     signal: signal,
                                     value: model.values[signal.pid],
-                                    dimmed: silent
+                                    dimmed: silent || model.isStandardStale(signal.pid, now: now)
                                 )
                             }
                         }
@@ -53,7 +55,6 @@ struct ContentView: View {
 
                     if !model.manufacturerHighlights.isEmpty {
                         manufacturerSection
-                            .opacity(silent ? 0.45 : 1)
                     }
 
                     if let notice = model.notice {
@@ -249,6 +250,7 @@ struct ContentView: View {
                     }
                     .padding(8)
                     .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+                    .opacity(model.isManufacturerStale(parameter, now: now) ? 0.45 : 1)
                 }
             }
         }
@@ -304,11 +306,15 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Button("Prepare export") {
-                    model.exportLastSession()
+                Button(preparingExport ? "Preparing…" : "Prepare export") {
+                    preparingExport = true
+                    Task {
+                        await model.exportLastSession()
+                        preparingExport = false
+                    }
                 }
                 .buttonStyle(.bordered)
-                .disabled(model.lastSessionURL == nil || model.isRecording)
+                .disabled(model.lastSessionURL == nil || model.isRecording || preparingExport)
 
                 if let url = model.exportURL {
                     ShareLink(item: url) {

@@ -12,6 +12,12 @@ let package = Package(
             name: "OBDLink",
             path: "Sources/OBDLink",
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "OBDLinkTests",
+            dependencies: ["OBDLink"],
+            path: "Tests/OBDLinkTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

@@ -13,7 +13,11 @@
     "JMFXLGF6W"
   ],
   "identity": {
-    "probeLIDs": ["01", "02", "03"],
+    "probeLIDs": [
+      "01",
+      "02",
+      "03"
+    ],
     "discriminators": [
       {
         "itemNumber": 2,
@@ -38,6 +42,60 @@
         "weight": 0.2
       }
     ]
+  },
+  "roles": {
+    "highlights": [
+      16,
+      17,
+      63,
+      64,
+      116,
+      117,
+      118,
+      119,
+      127,
+      142,
+      143,
+      148,
+      153,
+      155,
+      156,
+      191,
+      208
+    ],
+    "priorityLIDs": [
+      "10"
+    ],
+    "tripSnapshotLIDs": [
+      "03",
+      "10",
+      "11",
+      "12"
+    ],
+    "odometer": {
+      "lid": "03",
+      "itemNumber": 145
+    },
+    "dpfTemperature": {
+      "lid": "10",
+      "itemNumber": 119
+    },
+    "sootByAccumulation": {
+      "lid": "11",
+      "itemNumber": 155
+    },
+    "sootByPressure": {
+      "lid": "11",
+      "itemNumber": 156
+    },
+    "regenerationCount": {
+      "lid": "12",
+      "itemNumber": 148
+    },
+    "regenerationMode": {
+      "lid": "12",
+      "itemNumber": 116
+    }
   },
   "service": {
     "readByLocalIdentifier": "21",
@@ -519,7 +577,9 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
-          "unavailableRaw": [230],
+          "unavailableRaw": [
+            230
+          ],
           "observed": {
             "raw": 230,
             "value": 950.0
@@ -608,7 +668,9 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
-          "unavailableRaw": [230],
+          "unavailableRaw": [
+            230
+          ],
           "observed": {
             "raw": 230,
             "value": 950.0
@@ -646,7 +708,9 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
-          "unavailableRaw": [230],
+          "unavailableRaw": [
+            230
+          ],
           "observed": {
             "raw": 230,
             "value": 950.0
@@ -691,7 +755,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 2,
-            "value": 0.0
+            "value": 2.0
           }
         }
       ]
@@ -984,7 +1048,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 2,
-            "value": 0.0
+            "value": 2.0
           }
         },
         {
@@ -996,7 +1060,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 2,
-            "value": 0.0
+            "value": 2.0
           }
         }
       ]
@@ -1013,7 +1077,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 2,
-            "value": 0.0
+            "value": 2.0
           }
         },
         {
@@ -1025,7 +1089,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 2,
-            "value": 0.0
+            "value": 2.0
           }
         },
         {
@@ -1916,7 +1980,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1928,7 +1992,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1940,7 +2004,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1952,7 +2016,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1964,7 +2028,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1976,7 +2040,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 186,
-            "value": 0.0
+            "value": 186.0
           }
         },
         {
@@ -1988,7 +2052,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 128,
-            "value": 0.0
+            "value": 128.0
           }
         },
         {
@@ -2000,7 +2064,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 128,
-            "value": 0.0
+            "value": 128.0
           }
         },
         {
@@ -2012,7 +2076,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 128,
-            "value": 0.0
+            "value": 128.0
           }
         },
         {
@@ -2024,7 +2088,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 5,
-            "value": 0.0
+            "value": 5.0
           }
         },
         {
@@ -2036,7 +2100,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 5,
-            "value": 0.0
+            "value": 5.0
           }
         },
         {
@@ -2048,7 +2112,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 5,
-            "value": 0.0
+            "value": 5.0
           }
         },
         {
@@ -2060,7 +2124,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 5,
-            "value": 0.0
+            "value": 5.0
           }
         },
         {
@@ -2652,7 +2716,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 97,
-            "value": 0.0
+            "value": 97.0
           }
         },
         {
@@ -2664,7 +2728,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 97,
-            "value": 0.0
+            "value": 97.0
           }
         },
         {
@@ -2676,7 +2740,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 97,
-            "value": 0.0
+            "value": 97.0
           }
         },
         {
@@ -2688,7 +2752,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 97,
-            "value": 0.0
+            "value": 97.0
           }
         },
         {
@@ -2700,7 +2764,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 97,
-            "value": 0.0
+            "value": 97.0
           }
         },
         {
@@ -3915,7 +3979,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 32,
-            "value": 0.0
+            "value": 32.0
           }
         },
         {
@@ -3927,7 +3991,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 32,
-            "value": 0.0
+            "value": 32.0
           }
         },
         {
@@ -3939,7 +4003,7 @@
           "offset": 0.0,
           "observed": {
             "raw": 32,
-            "value": 0.0
+            "value": 32.0
           }
         },
         {
@@ -3951,21 +4015,8 @@
           "offset": 0.0,
           "observed": {
             "raw": 32,
-            "value": 0.0
+            "value": 32.0
           }
-        }
-      ]
-    },
-    {
-      "lid": "E1",
-      "parameters": [
-        {
-          "itemNumber": 5,
-          "name": "ECU serial number",
-          "byte": 2,
-          "length": -1,
-          "factor": 1.0,
-          "offset": 0.0
         }
       ]
     }

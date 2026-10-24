@@ -16,6 +16,11 @@ let package = Package(
                 .product(name: "OBDLink", package: "Link")
             ],
             path: "Sources/OBDProbe"
+        ),
+        .testTarget(
+            name: "OBDProbeTests",
+            dependencies: ["OBDProbe"],
+            path: "Tests/OBDProbeTests"
         )
     ]
 )

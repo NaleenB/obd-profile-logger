@@ -65,13 +65,15 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     private var rxBuffer = Data()
 
     private var pending: CheckedContinuation<String, Error>?
-    private var pendingCommand = ""
+    private var pendingID: UInt64 = 0
+    private var nextRequestID: UInt64 = 0
     private var timeoutItem: DispatchWorkItem?
 
     private var powerCont: CheckedContinuation<Void, Error>?
     private var powerTimeout: DispatchWorkItem?
     private var connectTimeout: DispatchWorkItem?
     private var scanCont: CheckedContinuation<[Candidate], Error>?
+    private var scanTimeoutItem: DispatchWorkItem?
     private var readyCont: CheckedContinuation<SerialPort, Error>?
 
     private var candidates: [Candidate] = []
@@ -93,12 +95,20 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     // MARK: - Lifecycle
 
     public func start() async throws {
-        let central = CBCentralManager(
-            delegate: self,
-            queue: nil,
-            options: [CBCentralManagerOptionShowPowerAlertKey: true]
-        )
-        self.central = central
+        // One central manager owns the whole process lifetime. Creating a new
+        // manager on every reconnect leaves the old delegate alive and lets
+        // callbacks from two managers compete for the same continuations.
+        if central == nil {
+            central = CBCentralManager(
+                delegate: self,
+                queue: nil,
+                options: [CBCentralManagerOptionShowPowerAlertKey: true]
+            )
+        }
+        guard let central else {
+            throw BLEError.unavailable("Bluetooth manager could not be created")
+        }
+        if central.state == .poweredOn { return }
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             lock.lock()
@@ -121,8 +131,16 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     public func shutdown() {
         central?.stopScan()
-        if let peripheral, peripheral.state != .disconnected {
-            central?.cancelPeripheralConnection(peripheral)
+        failScan(BLEError.notConnected)
+
+        // Clear ownership *before* asking CoreBluetooth to disconnect. The
+        // later didDisconnect callback is then recognisably for a peripheral we
+        // no longer own and cannot tear down a newer attempt.
+        let oldPeripheral = peripheral
+        peripheral = nil
+        port = nil
+        if let oldPeripheral, oldPeripheral.state != .disconnected {
+            central?.cancelPeripheralConnection(oldPeripheral)
         }
 
         // A shutdown must unblock everything that is waiting. Relying on a
@@ -133,6 +151,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.lock()
         let waiting = pending
         pending = nil
+        pendingID = 0
+        rxBuffer.removeAll()
         timeoutItem?.cancel()
         timeoutItem = nil
         lock.unlock()
@@ -168,24 +188,25 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     public func scan(seconds: TimeInterval) async throws -> [Candidate] {
         guard let central else { throw BLEError.unavailable("not started") }
+        // A scan is one operation. Starting another replaces the first rather
+        // than allowing an old timer to finish it early.
+        failScan(BLEError.noDevice("scan superseded by a newer scan"))
 
         candidates = []
         discoveredNames = []
-        mergedServices = [:]
 
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[Candidate], Error>) in
+            let item = DispatchWorkItem { [weak self] in self?.finishScan() }
             lock.lock()
             scanCont = cont
+            scanTimeoutItem = item
             lock.unlock()
 
             central.scanForPeripherals(
                 withServices: nil,
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
             )
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-                self?.finishScan()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
         }
     }
 
@@ -195,6 +216,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.lock()
         let cont = scanCont
         scanCont = nil
+        scanTimeoutItem?.cancel()
+        scanTimeoutItem = nil
         let list = candidates
         lastScanDetails = list
             .sorted { $0.rssi > $1.rssi }
@@ -209,6 +232,16 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.unlock()
 
         cont?.resume(returning: list)
+    }
+
+    private func failScan(_ error: Error) {
+        lock.lock()
+        let cont = scanCont
+        scanCont = nil
+        scanTimeoutItem?.cancel()
+        scanTimeoutItem = nil
+        lock.unlock()
+        cont?.resume(throwing: error)
     }
 
     /// The adapter that worked last time, retrieved by identifier without a
@@ -279,16 +312,21 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     /// Drops the current link so another candidate can be tried.
     public func disconnect() {
-        if let peripheral {
-            central?.cancelPeripheralConnection(peripheral)
-        }
+        failScan(BLEError.notConnected)
+        failReady(BLEError.notConnected)
+
+        let oldPeripheral = peripheral
         peripheral = nil
         port = nil
+        if let oldPeripheral {
+            central?.cancelPeripheralConnection(oldPeripheral)
+        }
 
         lock.lock()
         rxBuffer.removeAll()
         let stalled = pending
         pending = nil
+        pendingID = 0
         timeoutItem?.cancel()
         timeoutItem = nil
         lock.unlock()
@@ -335,6 +373,9 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     public func connect(_ candidate: Candidate) async throws -> SerialPort {
         guard let central else { throw BLEError.unavailable("not started") }
+        // A second connect must never inherit a prior peripheral's readiness
+        // continuation, delegate callbacks or partially discovered services.
+        disconnect()
 
         adapterName = candidate.name
         adapterIdentifier = candidate.peripheral.identifier.uuidString
@@ -359,6 +400,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
         peripheral.discoverServices(nil)
     }
 
@@ -367,6 +409,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
         failReady(BLEError.unavailable("could not connect: \(error?.localizedDescription ?? "unknown")"))
     }
 
@@ -375,10 +418,20 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
+        // An old candidate can disconnect after a newer one is connected. Its
+        // callback must not fail the new connection or request.
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
+
         let message = error?.localizedDescription ?? "link dropped"
+        self.peripheral = nil
+        port = nil
         lock.lock()
+        pendingID = 0
+        rxBuffer.removeAll()
         let waiting = pending
         pending = nil
+        timeoutItem?.cancel()
+        timeoutItem = nil
         lock.unlock()
         waiting?.resume(throwing: BLEError.writeFailed("adapter disconnected: \(message)"))
         failReady(BLEError.writeFailed("adapter disconnected: \(message)"))
@@ -408,6 +461,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     // MARK: - Service / characteristic discovery
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
         if let error {
             failReady(BLEError.unavailable("service discovery failed: \(error.localizedDescription)"))
             return
@@ -430,6 +484,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
+        guard self.peripheral?.identifier == service.peripheral?.identifier else { return }
         if let error {
             onWarning?("characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
         }
@@ -493,6 +548,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        guard self.peripheral?.identifier == characteristic.service?.peripheral?.identifier else { return }
         if let error {
             failReady(BLEError.unavailable("could not subscribe to notifications: \(error.localizedDescription)"))
             return
@@ -513,7 +569,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard let data = characteristic.value else { return }
+        guard self.peripheral?.identifier == characteristic.service?.peripheral?.identifier,
+              let data = characteristic.value else { return }
 
         if characteristic.service?.uuid == Self.deviceInfoService {
             let text = String(decoding: data, as: UTF8.self)
@@ -557,6 +614,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
         let cont = pending
         pending = nil
+        pendingID = 0
         timeoutItem?.cancel()
         timeoutItem = nil
         lock.unlock()
@@ -577,10 +635,22 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
                 cont.resume(throwing: BLEError.writeFailed("another request is already in flight"))
                 return
             }
+            let requestID = nextRequestID &+ 1
+            nextRequestID = requestID
+            let item = DispatchWorkItem { [weak self] in
+                self?.timeoutRequest(requestID, command: command)
+            }
             pending = cont
-            pendingCommand = command
+            pendingID = requestID
             rxBuffer.removeAll()
+            timeoutItem?.cancel()
+            timeoutItem = item
             lock.unlock()
+
+            // Scheduled before the write: a very fast response can otherwise
+            // cancel a nil timeout and leave this work item to fail a later
+            // request.
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: item)
 
             let bytes = Data(payload.utf8)
             let chunkLimit = peripheral.maximumWriteValueLength(for: port.writeType)
@@ -591,21 +661,21 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
                 peripheral.writeValue(bytes.subdata(in: offset..<end), for: port.write, type: port.writeType)
                 offset = end
             }
-
-            let item = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.lock.lock()
-                let stalled = self.pending
-                self.pending = nil
-                self.rxBuffer.removeAll()
-                self.lock.unlock()
-                stalled?.resume(throwing: BLEError.timeout(command))
-            }
-
-            lock.lock()
-            timeoutItem = item
-            lock.unlock()
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: item)
         }
+    }
+
+    private func timeoutRequest(_ requestID: UInt64, command: String) {
+        lock.lock()
+        guard pendingID == requestID else {
+            lock.unlock()
+            return
+        }
+        let stalled = pending
+        pending = nil
+        pendingID = 0
+        rxBuffer.removeAll()
+        timeoutItem = nil
+        lock.unlock()
+        stalled?.resume(throwing: BLEError.timeout(command))
     }
 }

@@ -21,6 +21,7 @@ public final class SessionRecorder {
     private let lock = NSLock()
     private let encoder: JSONEncoder
     private var closed = false
+    private var manifestWriteProblem: String?
     private var sampleCount = 0
     private var eventCount = 0
 
@@ -91,10 +92,7 @@ public final class SessionRecorder {
             unit: unit,
             raw: raw
         )
-        try append(record, to: sampleHandle)
-        lock.lock()
-        sampleCount += 1
-        lock.unlock()
+        try appendSample(record)
     }
 
     /// Manufacturer observation. The elapsed time and wall clock are stamped
@@ -103,10 +101,7 @@ public final class SessionRecorder {
         var stamped = record
         stamped.elapsedMs = clock.nowMs()
         stamped.wallTime = WallClock.iso()
-        try append(stamped, to: sampleHandle)
-        lock.lock()
-        sampleCount += 1
-        lock.unlock()
+        try appendSample(stamped)
     }
 
     // MARK: - Events
@@ -118,10 +113,7 @@ public final class SessionRecorder {
             type: type,
             details: details
         )
-        try append(record, to: eventHandle)
-        lock.lock()
-        eventCount += 1
-        lock.unlock()
+        try appendEvent(record)
     }
 
     // MARK: - Lifecycle
@@ -145,6 +137,12 @@ public final class SessionRecorder {
         lock.unlock()
 
         var problems: [String] = []
+        lock.lock()
+        if let manifestWriteProblem {
+            problems.append(manifestWriteProblem)
+            self.manifestWriteProblem = nil
+        }
+        lock.unlock()
 
         do {
             let stop = EventRecord(
@@ -207,20 +205,27 @@ public final class SessionRecorder {
     /// one most worth reading later, so it must not lie about what produced it.
     /// These changes are rare — a profile resolves once, the odometer once — so
     /// the write cost is irrelevant next to a sample stream.
-    public func updateManifest(_ change: (inout SessionManifest) -> Void) {
+    @discardableResult
+    public func updateManifest(_ change: (inout SessionManifest) -> Void) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         // Checked before mutating: a closed session has already written its
         // final manifest, and a late change must not touch the in-memory copy
         // the writer used.
-        guard !closed else { return }
+        guard !closed else { return false }
         change(&manifest)
-        // Best effort: a manifest that cannot be written is already reported by
-        // `finish`, and losing the recording over it would be worse.
-        try? JSONEncoder.pretty
-            .encode(manifest)
-            .write(to: directory.appendingPathComponent(Self.manifestFilename()),
-                   options: .atomic)
+        do {
+            try JSONEncoder.pretty
+                .encode(manifest)
+                .write(to: directory.appendingPathComponent(Self.manifestFilename()),
+                       options: .atomic)
+            return true
+        } catch {
+            // Do not stop the sample stream for this, but do not pretend it was
+            // persisted: finish() reports it as an incomplete finalisation.
+            manifestWriteProblem = "manifest update: \(error)"
+            return false
+        }
     }
 
     public var isClosed: Bool {
@@ -231,11 +236,23 @@ public final class SessionRecorder {
 
     // MARK: - Internals
 
-    private func append<T: Encodable>(_ record: T, to handle: FileHandle) throws {
+    /// The write and its count share one critical section. Incrementing after
+    /// releasing the lock let finalisation snapshot a count that omitted a
+    /// sample already present in the file.
+    private func appendSample<T: Encodable>(_ record: T) throws {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { throw RecorderError.alreadyClosed }
-        try write(record, to: handle)
+        try write(record, to: sampleHandle)
+        sampleCount += 1
+    }
+
+    private func appendEvent<T: Encodable>(_ record: T) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { throw RecorderError.alreadyClosed }
+        try write(record, to: eventHandle)
+        eventCount += 1
     }
 
     /// The stop event is the one record written after `closed` is set, by the

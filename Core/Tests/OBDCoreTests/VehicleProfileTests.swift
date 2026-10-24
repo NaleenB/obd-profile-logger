@@ -78,6 +78,13 @@ final class VehicleProfileTests: XCTestCase {
 
         let pressure = try XCTUnwrap(decoded.first { $0.itemNumber == 156 })
         XCTAssertEqual(pressure.value, 0.3, accuracy: 0.001)
+
+        let role = try XCTUnwrap(profile.roles?.sootByAccumulation)
+        XCTAssertEqual(try XCTUnwrap(role.value(in: decoded)), 2.6, accuracy: 0.001)
+        XCTAssertEqual(
+            try XCTUnwrap(profile.roles?.sootByPressure?.value(in: decoded)),
+            0.3,
+            accuracy: 0.001)
     }
 
     func testDecodesCapturedRegenerationFrame() throws {
@@ -137,7 +144,8 @@ final class VehicleProfileTests: XCTestCase {
         let frame = try XCTUnwrap(MUT21Frame(hex: "6111141F34061D"))
         let highlights = profile.highlights(from: profile.decode(frame))
         let items = Set(highlights.compactMap(\.itemNumber))
-        XCTAssertTrue(items.isSubset(of: VehicleProfile.highlightItemNumbers))
+        let configured = Set(try XCTUnwrap(profile.roles?.highlights))
+        XCTAssertTrue(items.isSubset(of: configured))
         XCTAssertTrue(items.contains(155))
     }
 
@@ -158,6 +166,47 @@ final class VehicleProfileTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("absent.json")
         XCTAssertThrowsError(try VehicleProfileLoader.load(from: url)) { error in
             XCTAssertEqual(error as? VehicleProfileError, .notFound("absent.json"))
+        }
+    }
+
+    private func loadInline(_ json: String) throws -> VehicleProfile {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("validate-\(UUID().uuidString).json")
+        try Data(json.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try VehicleProfileLoader.load(from: url)
+    }
+
+    func testValidatorRejectsNegativeParameterLength() {
+        let json = """
+        {"schemaVersion":1,"id":"x","manufacturer":"X","model":"Y","year":2020,
+         "engine":"1.0","service":{"readByLocalIdentifier":"21","readByIdentifier":null},
+         "blocks":[{"lid":"11","parameters":[
+           {"itemNumber":1,"name":"bad","byte":2,"length":-1,"factor":1,"offset":0}
+         ]}]}
+        """
+        XCTAssertThrowsError(try loadInline(json)) { error in
+            guard case VehicleProfileError.malformed(let message) = error else {
+                return XCTFail("expected malformed, got \(error)")
+            }
+            XCTAssertTrue(message.contains("unsupported length"), message)
+        }
+    }
+
+    func testValidatorRejectsObservedValueThatDisagreesWithScaling() {
+        let json = """
+        {"schemaVersion":1,"id":"x","manufacturer":"X","model":"Y","year":2020,
+         "engine":"1.0","service":{"readByLocalIdentifier":"21","readByIdentifier":null},
+         "blocks":[{"lid":"11","parameters":[
+           {"itemNumber":1,"name":"switch","byte":2,"length":1,"factor":1,"offset":0,
+            "observed":{"raw":2,"value":0}}
+         ]}]}
+        """
+        XCTAssertThrowsError(try loadInline(json)) { error in
+            guard case VehicleProfileError.malformed(let message) = error else {
+                return XCTFail("expected malformed, got \(error)")
+            }
+            XCTAssertTrue(message.contains("observed value"), message)
         }
     }
 }
@@ -218,8 +267,7 @@ final class StandardSignalTests: XCTestCase {
     func testProfileWithoutStandardSignalsYieldsNone() throws {
         let json = """
         {"schemaVersion":1,"id":"x","manufacturer":"X","model":"Y","year":2020,
-         "engine":"1.0","notes":[],"service":{"readByLocalIdentifier":null,"readByIdentifier":null},
-         "blocks":[]}
+         "engine":"1.0","service":{"readByLocalIdentifier":null,"readByIdentifier":null}}
         """
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("p-\(UUID().uuidString).json")
         try Data(json.utf8).write(to: url)

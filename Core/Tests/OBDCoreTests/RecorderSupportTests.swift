@@ -1,29 +1,6 @@
 import XCTest
 @testable import OBDCore
 
-final class PIDScalingTests: XCTestCase {
-
-    /// Raw 0x0D2C = 3372. PID 0x23 is 10 kPa per bit, so 33 720 kPa = 337.2 bar.
-    func testRailPressureConvertsToBar() {
-        XCTAssertEqual(PIDScaling.railPressureBar(raw: 0x0D2C), 337.2, accuracy: 0.001)
-        XCTAssertEqual(PIDScaling.railPressureBar(a: 0x0D, b: 0x2C), 337.2, accuracy: 0.001)
-    }
-
-    func testRailPressureKiloPascals() {
-        XCTAssertEqual(PIDScaling.railPressureKPa(raw: 3372), 33_720, accuracy: 0.001)
-    }
-
-    func testZeroIsZero() {
-        XCTAssertEqual(PIDScaling.railPressureBar(raw: 0), 0)
-    }
-
-    /// The previous implementation returned the raw value, understating pressure
-    /// by a factor of ten.
-    func testNotRawValue() {
-        XCTAssertNotEqual(PIDScaling.railPressureBar(raw: 3372), 3372)
-    }
-}
-
 final class DTCSnapshotTests: XCTestCase {
 
     private func diagnostics(mil: Bool?, stored: [String]?, complete: Bool) -> VehicleDiagnostics {

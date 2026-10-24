@@ -27,9 +27,15 @@ struct ProbeApp {
     static func main() async {
         let options = parseArguments()
 
+        guard Probe.readOnlySweepServices.contains(options.sweepService) else {
+            sayErr(String(
+                format: "Refusing service %02X: the probe only sweeps read-only services 21, 22 and 1A.",
+                options.sweepService))
+            exit(2)
+        }
+
         if options.selfTest {
-            runSelfTest()
-            exit(0)
+            exit(runSelfTest())
         }
 
         say("OBDProbe 0.1.0  —  BLE ELM327 capability probe")
@@ -330,7 +336,7 @@ struct ProbeApp {
 
     // MARK: - Parser self-test
 
-    static func runSelfTest() {
+    static func runSelfTest() -> Int32 {
         var failures = 0
 
         func check(_ label: String, _ condition: Bool, _ detail: @autoclosure () -> String) {
@@ -397,7 +403,7 @@ struct ProbeApp {
               "got \(calid.payloadFrames.count)")
 
         // PID bitmap expansion: BE 1F A8 13 at base 00
-        let expanded = Probe.expandBitmap([0xBE, 0x1F, 0xA8, 0x13], base: 0x00)
+        let expanded = PIDCapabilities.expand(bitmap: [0xBE, 0x1F, 0xA8, 0x13], base: 0x00)
         check("bitmap expands to 01,03,04,05,06,07,0C,0D,0F,10,11,13,15,1C,1F,20,21",
               expanded.contains(0x0C) && expanded.contains(0x0D) && expanded.contains(0x20) && !expanded.contains(0x02),
               "got \(expanded.map { String(format: "%02X", $0) })")
@@ -409,8 +415,9 @@ struct ProbeApp {
         say("")
         if failures == 0 {
             say("All parser checks passed.")
-        } else {
-            say("\(failures) check(s) failed.")
+            return 0
         }
+        say("\(failures) check(s) failed.")
+        return 1
     }
 }

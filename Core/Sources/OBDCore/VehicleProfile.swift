@@ -133,6 +133,42 @@ public struct VehicleProfile: Codable, Equatable {
         public let weight: Double
     }
 
+    /// A named parameter this profile can expose to a feature without the app
+    /// knowing its manufacturer's item number.
+    public struct Role: Codable, Equatable {
+        /// Local identifier, so a role stays unambiguous when item numbers repeat
+        /// across blocks.
+        public let lid: String?
+        public let itemNumber: Int
+
+        public var lidValue: UInt8? { lid.flatMap { UInt8($0, radix: 16) } }
+
+        public func value(in parameters: some Sequence<DecodedParameter>) -> Double? {
+            parameters.first { parameter in
+                parameter.itemNumber == itemNumber
+                    && (lidValue == nil || parameter.lid == lidValue)
+            }?.value
+        }
+    }
+
+    /// Optional meanings the app may attach to otherwise generic parameters.
+    /// A profile without roles remains fully decodable; features that need a
+    /// role simply do not appear.
+    public struct Roles: Codable, Equatable {
+        /// Parameters worth showing without scrolling, by data-list item number.
+        public let highlights: [Int]?
+        /// Live blocks that should be refreshed every polling cycle.
+        public let priorityLIDs: [String]?
+        /// Blocks captured at each end of a session.
+        public let tripSnapshotLIDs: [String]?
+        public let odometer: Role?
+        public let dpfTemperature: Role?
+        public let sootByAccumulation: Role?
+        public let sootByPressure: Role?
+        public let regenerationCount: Role?
+        public let regenerationMode: Role?
+    }
+
     public let schemaVersion: Int
     public let id: String
     public let manufacturer: String
@@ -147,12 +183,43 @@ public struct VehicleProfile: Codable, Equatable {
     /// ID is unavailable.
     public let vinPrefixes: [String]?
     public let notes: [String]
+    public let roles: Roles?
     public let service: Service
     public let transport: Transport?
     public let standard: [StandardSignal]?
     public let blocks: [Block]
     /// Absent means the profile can only be matched by calibration ID or VIN.
     public let identity: IdentitySpec?
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, id, manufacturer, model, year, engine, market
+        case calibrationIDs, vinPrefixes, notes, roles, service, transport
+        case standard, blocks, identity
+    }
+
+    /// A profile is an extension point, so fields the schema calls optional must
+    /// really be optional. Synthesized Codable would otherwise require `notes`
+    /// and `blocks` even though an incomplete profile is supposed to degrade to
+    /// generic decoding.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        id = try container.decode(String.self, forKey: .id)
+        manufacturer = try container.decode(String.self, forKey: .manufacturer)
+        model = try container.decode(String.self, forKey: .model)
+        year = try container.decode(Int.self, forKey: .year)
+        engine = try container.decode(String.self, forKey: .engine)
+        market = try container.decodeIfPresent(String.self, forKey: .market)
+        calibrationIDs = try container.decodeIfPresent([String].self, forKey: .calibrationIDs)
+        vinPrefixes = try container.decodeIfPresent([String].self, forKey: .vinPrefixes)
+        notes = try container.decodeIfPresent([String].self, forKey: .notes) ?? []
+        roles = try container.decodeIfPresent(Roles.self, forKey: .roles)
+        service = try container.decode(Service.self, forKey: .service)
+        transport = try container.decodeIfPresent(Transport.self, forKey: .transport)
+        standard = try container.decodeIfPresent([StandardSignal].self, forKey: .standard)
+        blocks = try container.decodeIfPresent([Block].self, forKey: .blocks) ?? []
+        identity = try container.decodeIfPresent(IdentitySpec.self, forKey: .identity)
+    }
 
     /// Standard signals to poll, falling back to an empty list rather than
     /// inventing a set.
@@ -202,7 +269,11 @@ public enum VehicleProfileLoader {
             throw VehicleProfileError.notFound(url.lastPathComponent)
         }
         do {
-            return try JSONDecoder().decode(VehicleProfile.self, from: data)
+            let profile = try JSONDecoder().decode(VehicleProfile.self, from: data)
+            try profile.validate()
+            return profile
+        } catch let error as VehicleProfileError {
+            throw error
         } catch {
             throw VehicleProfileError.malformed(error.localizedDescription)
         }
@@ -216,10 +287,161 @@ public enum VehicleProfileLoader {
     }
 }
 
+extension VehicleProfile {
+
+    /// Reject a profile that cannot be interpreted safely.
+    ///
+    /// JSON decoding alone accepts negative byte lengths, duplicate identifiers
+    /// and `observed` evidence that disagrees with the emitted scaling. Those
+    /// mistakes are silent at runtime, which is precisely how a profile becomes
+    /// trusted when it should not be.
+    func validate() throws {
+        func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+            guard condition() else { throw VehicleProfileError.malformed(message) }
+        }
+
+        try require(schemaVersion == 1, "unsupported schemaVersion \(schemaVersion)")
+        try require(!id.isEmpty, "profile id is empty")
+        try require(!manufacturer.isEmpty, "manufacturer is empty")
+        try require(!model.isEmpty, "model is empty")
+        try require(!engine.isEmpty, "engine is empty")
+
+        var seenLIDs = Set<UInt8>()
+        var parametersByLID: [UInt8: [Int: VehicleProfile.Parameter]] = [:]
+        for block in blocks {
+            guard let lid = block.lidValue else {
+                throw VehicleProfileError.malformed("block lid '\(block.lid)' is not a hex byte")
+            }
+            try require(seenLIDs.insert(lid).inserted, "duplicate block lid \(block.lid)")
+            var items: [Int: VehicleProfile.Parameter] = [:]
+            for parameter in block.parameters {
+                try require(!parameter.name.isEmpty, "a parameter in LID \(block.lid) has no name")
+                try require(parameter.byte >= 0, "\(parameter.name) has a negative byte offset")
+                try require((1...8).contains(parameter.length),
+                           "\(parameter.name) has unsupported length \(parameter.length)")
+                try require(parameter.factor.isFinite && parameter.offset.isFinite,
+                           "\(parameter.name) has non-finite scaling")
+                if let observed = parameter.observed {
+                    let expected = Double(observed.raw) * parameter.factor + parameter.offset
+                    try require(abs(expected - observed.value) < 0.000_001,
+                               "\(parameter.name) observed value \(observed.value) does not match scaling (expected \(expected))")
+                }
+                if let item = parameter.itemNumber {
+                    // An item number can describe more than one labelled field
+                    // in the same block. Roles carry the LID and item together,
+                    // so that ambiguity is handled at the role boundary.
+                    items[item] = items[item] ?? parameter
+                }
+            }
+            parametersByLID[lid] = items
+        }
+
+        var seenPIDs = Set<UInt8>()
+        for signal in signals {
+            guard let pid = signal.pidValue else {
+                throw VehicleProfileError.malformed("standard PID '\(signal.pid)' is not a hex byte")
+            }
+            try require(seenPIDs.insert(pid).inserted, "duplicate standard PID \(signal.pid)")
+            try require(signal.bytes == 1 || signal.bytes == 2,
+                       "PID \(signal.pid) must use one or two bytes")
+            try require(signal.factor.isFinite && signal.offset.isFinite,
+                       "PID \(signal.pid) has non-finite scaling")
+            try require((0...6).contains(signal.decimals),
+                       "PID \(signal.pid) has an unsupported display precision")
+        }
+
+        if let transport {
+            try require(!transport.elmProtocol.isEmpty, "transport has an empty elmProtocol")
+            for module in transport.modules {
+                try require(module.requestHeader.count == 3
+                            && UInt16(module.requestHeader, radix: 16) != nil,
+                           "module \(module.name) has an invalid request header")
+                if let response = module.responseHeader {
+                    try require(response.count == 3 && UInt16(response, radix: 16) != nil,
+                               "module \(module.name) has an invalid response header")
+                }
+            }
+        }
+
+        if let identity {
+            var probeLIDs = Set<UInt8>()
+            for raw in identity.probeLIDs {
+                guard let lid = UInt8(raw, radix: 16) else {
+                    throw VehicleProfileError.malformed("identity probe LID '\(raw)' is not a hex byte")
+                }
+                try require(parametersByLID[lid] != nil, "identity probe LID \(raw) has no block")
+                probeLIDs.insert(lid)
+            }
+            try require(identity.discriminators.contains { $0.required == true },
+                       "identity needs at least one required discriminator")
+            let probeItems = Set(probeLIDs.flatMap { Array(parametersByLID[$0]?.keys ?? [:].keys) })
+            for rule in identity.discriminators {
+                try require(probeItems.contains(rule.itemNumber),
+                           "identity item \(rule.itemNumber) is not in a probe block")
+                if let pid = rule.pidValue {
+                    try require(seenPIDs.contains(pid),
+                               "identity PID \(rule.sameAsPID) is not polled")
+                } else {
+                    throw VehicleProfileError.malformed("identity PID '\(rule.sameAsPID)' is not a hex byte")
+                }
+                try require(rule.tolerance >= 0 && rule.weight >= 0,
+                           "identity item \(rule.itemNumber) has invalid tolerance or weight")
+            }
+            for rule in identity.plausibility ?? [] {
+                try require(probeItems.contains(rule.itemNumber),
+                           "plausibility item \(rule.itemNumber) is not in a probe block")
+                try require(rule.min <= rule.max,
+                           "plausibility item \(rule.itemNumber) has min above max")
+            }
+        }
+
+        if let roles {
+            for item in roles.highlights ?? [] {
+                try require(parametersByLID.values.contains { $0[item] != nil },
+                           "highlight item \(item) is not defined")
+            }
+            func check(_ role: Role?, _ name: String) throws {
+                guard let role else { return }
+                guard let lid = role.lidValue else {
+                    throw VehicleProfileError.malformed("\(name) role has no valid LID")
+                }
+                try require(parametersByLID[lid]?[role.itemNumber] != nil,
+                           "\(name) role points at item \(role.itemNumber) in LID \(role.lid ?? "?")")
+            }
+            try check(roles.odometer, "odometer")
+            try check(roles.dpfTemperature, "DPF temperature")
+            try check(roles.sootByAccumulation, "soot by accumulation")
+            try check(roles.sootByPressure, "soot by pressure")
+            try check(roles.regenerationCount, "regeneration count")
+            try check(roles.regenerationMode, "regeneration mode")
+            for raw in roles.priorityLIDs ?? [] {
+                guard let lid = UInt8(raw, radix: 16) else {
+                    throw VehicleProfileError.malformed("priority LID '\(raw)' is not a hex byte")
+                }
+                try require(parametersByLID[lid] != nil, "priority LID \(raw) has no block")
+            }
+            for raw in roles.tripSnapshotLIDs ?? [] {
+                guard let lid = UInt8(raw, radix: 16) else {
+                    throw VehicleProfileError.malformed("snapshot LID '\(raw)' is not a hex byte")
+                }
+                try require(parametersByLID[lid] != nil, "snapshot LID \(raw) has no block")
+            }
+        }
+    }
+}
+
 public extension VehicleProfile {
 
     var localIdentifiers: [UInt8] {
         blocks.compactMap(\.lidValue)
+    }
+
+    var priorityLIDs: [UInt8] {
+        (roles?.priorityLIDs ?? []).compactMap { UInt8($0, radix: 16) }
+    }
+
+    var tripSnapshotLIDs: [UInt8] {
+        (roles?.tripSnapshotLIDs ?? []).compactMap { UInt8($0, radix: 16) }
     }
 
     /// Decodes every parameter in a frame, skipping values that fall outside the
@@ -247,27 +469,14 @@ public extension VehicleProfile {
         }
     }
 
-    /// Parameters worth showing without scrolling, by data-list item number.
-    /// Kept explicit so the choice is reviewable rather than guessed by name.
-    static let highlightItemNumbers: Set<Int> = [
-        16, 17,      // EGR valve position, target
-        63, 64,      // rail pressure, target
-        116,         // regeneration request mode
-        117, 118, 119,  // EGT 1, catalyst, DPF temperature
-        127,         // DPF temperature max (stored)
-        142, 143,    // VGT duty before/after compensation
-        148,         // regeneration count
-        153,         // distance since last regeneration
-        155, 156,    // soot loading, both models
-        191,         // non-uniform soot
-        208          // short-interval regeneration rate
-    ]
-
+    /// Parameters worth showing without scrolling. The choice belongs to the
+    /// vehicle profile, not to generic decoding code.
     func highlights(from decoded: [DecodedParameter]) -> [DecodedParameter] {
-        decoded
+        let wanted = Set(roles?.highlights ?? [])
+        return decoded
             .filter { parameter in
                 guard let item = parameter.itemNumber else { return false }
-                return Self.highlightItemNumbers.contains(item)
+                return wanted.contains(item)
             }
             .sorted { ($0.itemNumber ?? 0) < ($1.itemNumber ?? 0) }
     }

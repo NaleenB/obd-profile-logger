@@ -6,8 +6,6 @@ import Foundation
 /// resource file cannot silently become a selectable vehicle.
 public enum ProfileCatalog {
 
-    public static let defaultID = "mitsubishi-outlander-2016-4n14"
-
     public struct Entry: Identifiable, Equatable {
         public let id: String
         public let title: String
@@ -24,8 +22,19 @@ public enum ProfileCatalog {
         "iso15765-can"
     ]
 
+    /// Loads by bundle resource name.
     public static func load(id: String, bundle: Bundle = .main) throws -> VehicleProfile {
         try VehicleProfileLoader.load(named: id, in: bundle)
+    }
+
+    /// Maps a stable profile id to its bundle resource name. Keeping this here
+    /// prevents the app and the catalogue from maintaining separate switches.
+    public static func resourceName(for profileID: String, bundle: Bundle = .main) -> String? {
+        for file in builtInIDs {
+            if file == profileID { return file }
+            if (try? load(id: file, bundle: bundle))?.id == profileID { return file }
+        }
+        return nil
     }
 
     /// The fallback profile: standard OBD-II only. Never selected by the user;

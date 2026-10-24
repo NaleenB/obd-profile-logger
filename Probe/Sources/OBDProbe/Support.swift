@@ -128,6 +128,7 @@ final class SessionLogger: ELMLogger {
 enum ProbeError: Error, CustomStringConvertible {
     case ignitionTimeout(Int)
     case noData(String)
+    case disallowedService(UInt8)
 
     var description: String {
         switch self {
@@ -135,6 +136,10 @@ enum ProbeError: Error, CustomStringConvertible {
             return "No ECU response after \(s)s. Check ignition is ON and the dongle is fully seated."
         case .noData(let c):
             return "No usable data for command '\(c)'"
+        case .disallowedService(let service):
+            return String(
+                format: "Service %02X is not a read-only sweep service. Allowed: 21, 22 and 1A.",
+                service)
         }
     }
 }

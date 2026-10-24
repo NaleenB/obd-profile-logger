@@ -10,10 +10,12 @@ struct SessionsView: View {
     @State private var summaries: [SessionSummary] = []
     @State private var selected: SessionSummary?
     @State private var exportURL: URL?
+    @State private var exportedSessionID: String?
     @State private var allExportURL: URL?
     @State private var message: String?
     @State private var pendingDelete: SessionSummary?
     @State private var confirmingDeleteAll = false
+    @State private var isPreparing = false
 
     init(activeSessionID: String? = nil, onDeleted: @escaping (Set<String>) -> Void = { _ in }) {
         self.activeSessionID = activeSessionID
@@ -97,7 +99,10 @@ struct SessionsView: View {
             List(summaries) { summary in
                 row(summary)
                     .contentShape(Rectangle())
-                    .onTapGesture { selected = summary }
+                    .onTapGesture {
+                        guard summary.id != activeSessionID else { return }
+                        selected = summary
+                    }
                     .listRowBackground(
                         selected?.id == summary.id
                             ? Color.accentColor.opacity(0.15)
@@ -159,9 +164,10 @@ struct SessionsView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
-                    Button("Prepare ZIP") { prepare(selected) }
+                    Button(isPreparing ? "Preparing…" : "Prepare ZIP") { prepare(selected) }
                         .buttonStyle(.bordered)
-                    if let exportURL {
+                        .disabled(isPreparing || selected.id == activeSessionID)
+                    if let exportURL, exportedSessionID == selected.id {
                         ShareLink(item: exportURL) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
@@ -189,7 +195,7 @@ struct SessionsView: View {
                             Label("Share all", systemImage: "square.and.arrow.up")
                         }
                         .buttonStyle(.bordered)
-                        .disabled(deletableSessions.isEmpty)
+                        .disabled(deletableSessions.isEmpty || isPreparing)
                     }
                 }
             }
@@ -207,9 +213,14 @@ struct SessionsView: View {
     // MARK: - Actions
 
     private func reload() {
-        summaries = SessionStore.summaries()
-        if let selected, !summaries.contains(where: { $0.id == selected.id }) {
-            self.selected = nil
+        Task { @MainActor in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                SessionStore.summaries()
+            }.value
+            summaries = loaded
+            if let selected, !loaded.contains(where: { $0.id == selected.id }) {
+                self.selected = nil
+            }
         }
     }
 
@@ -219,24 +230,45 @@ struct SessionsView: View {
             message = "No finished sessions to share."
             return
         }
-        do {
-            if let existing = allExportURL { SessionArchive.discard(existing) }
-            allExportURL = try SessionArchive.exportAll(exportable.map(\.directory))
-            message = nil
-        } catch {
-            message = "\(error)"
-            allExportURL = nil
+        let directories = exportable.map(\.directory)
+        isPreparing = true
+        message = nil
+        Task { @MainActor in
+            defer { isPreparing = false }
+            do {
+                let created = try await Task.detached(priority: .userInitiated) {
+                    try SessionArchive.exportAll(directories)
+                }.value
+                if let existing = allExportURL { SessionArchive.discard(existing) }
+                allExportURL = created
+            } catch {
+                message = "\(error)"
+                allExportURL = nil
+            }
         }
     }
 
     private func prepare(_ summary: SessionSummary) {
-        do {
-            if let existing = exportURL { SessionArchive.discard(existing) }
-            exportURL = try SessionArchive.export(summary.directory)
-            message = nil
-        } catch {
-            message = "\(error)"
-            exportURL = nil
+        guard summary.id != activeSessionID else {
+            message = "Stop recording before exporting this session."
+            return
+        }
+        let directory = summary.directory
+        isPreparing = true
+        message = nil
+        Task { @MainActor in
+            defer { isPreparing = false }
+            do {
+                let created = try await Task.detached(priority: .userInitiated) {
+                    try SessionArchive.export(directory)
+                }.value
+                if let existing = exportURL { SessionArchive.discard(existing) }
+                exportURL = created
+                exportedSessionID = summary.id
+            } catch {
+                message = "\(error)"
+                exportURL = nil
+            }
         }
     }
 
@@ -245,9 +277,10 @@ struct SessionsView: View {
         do {
             try SessionStore.deleteSession(at: summary.directory)
             if selected?.id == summary.id { selected = nil }
-            if let exportURL, exportURL.lastPathComponent.hasPrefix(summary.id) {
+            if exportedSessionID == summary.id, let exportURL {
                 SessionArchive.discard(exportURL)
                 self.exportURL = nil
+                exportedSessionID = nil
             }
             onDeleted([summary.id])
             reload()
@@ -266,6 +299,7 @@ struct SessionsView: View {
             selected = nil
             if let exportURL { SessionArchive.discard(exportURL) }
             exportURL = nil
+            exportedSessionID = nil
             if let allExportURL { SessionArchive.discard(allExportURL) }
             allExportURL = nil
             onDeleted(removing)

@@ -28,7 +28,7 @@ This project does both:
 |---|---|---|
 | **Standard OBD-II** | Any car with a compliant ELM327 adapter | Modes `01`, `03`, `07`, `0A`, `09` |
 | **Vehicle profile** | Per vehicle, loaded from JSON | Manufacturer service, byte offsets, scaling |
-| **Included profile** | 2016 Outlander 2.2 DiD (4N14) | Mitsubishi service `0x21` — 274 parameters |
+| **Included profile** | 2016 Outlander 2.2 DiD (4N14) | Mitsubishi service `0x21` — 273 parameters |
 
 Verified on the car, not inferred:
 
@@ -47,11 +47,12 @@ five rail pressures, oil dilution, and rail pressure versus target.
 
 | Vehicle | Standard OBD | Manufacturer data | Verified |
 |---|---|---|---|
-| Mitsubishi Outlander 2016, 2.2 DiD (4N14) | yes | yes — 274 parameters | on car |
+| Mitsubishi Outlander 2016, 2.2 DiD (4N14) | yes | yes — 273 parameters | on car |
 | Generic ISO 15765-4 (CAN) — template | yes | none | not yet |
 | Anything else | depends on protocol and module headers | needs a profile | — |
 
-Adding a vehicle is a JSON file, not code. See [`profiles/README.md`](profiles/README.md).
+Adding a vehicle is a JSON profile plus registering its bundled resource; decoding,
+polling and presentation stay generic. See [`profiles/README.md`](profiles/README.md).
 
 ### Unverified: which other Mitsubishis might work
 

@@ -19,11 +19,21 @@ jobs:
       - name: swift test
         run: cd Core && swift test
 
+  link:
+    name: Link tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: cd Link && swift test
+
   probe:
     name: Probe self-test
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Probe tests
+        run: cd Probe && swift test
       - name: ELM327 parser checks (no adapter required)
         run: cd Probe && ./run.sh --self-test
 

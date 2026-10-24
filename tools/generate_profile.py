@@ -126,6 +126,16 @@ def main():
     parser.add_argument("--lang", required=True)
     parser.add_argument("--capture", help="probe.json from a service 0x21 sweep")
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--existing",
+        help="existing profile whose curated metadata and sentinels should be preserved",
+    )
+    parser.add_argument("--id", dest="profile_id")
+    parser.add_argument("--manufacturer")
+    parser.add_argument("--model")
+    parser.add_argument("--year", type=int)
+    parser.add_argument("--engine")
+    parser.add_argument("--market")
     args = parser.parse_args()
 
     names = load_names(args.lang)
@@ -151,7 +161,7 @@ def main():
         frame = observed.get(lid)
 
         for param in qual["params"]:
-            if param["byte"] < 0:
+            if param["byte"] < 0 or param["length"] <= 0 or param["length"] > 8:
                 continue
             # Enumerations and flags carry factor 0 in the source data because
             # they are not scaled numbers. Passing raw through (factor 1) is what
@@ -176,7 +186,9 @@ def main():
                     raw = int.from_bytes(chunk, "big")
                     entry["observed"] = {
                         "raw": raw,
-                        "value": raw * param["factor"] + param["offset"],
+                        # Record the value under the effective scaling that the
+                        # profile actually emits, not the source's zero factor.
+                        "value": raw * factor + param["offset"],
                     }
 
             bucket = blocks.setdefault(lid, [])
@@ -191,12 +203,12 @@ def main():
 
     profile = {
         "schemaVersion": 1,
-        "id": "mitsubishi-outlander-2016-4n14",
-        "manufacturer": "Mitsubishi",
-        "model": "Outlander",
-        "year": 2016,
-        "engine": "4N14 2.2 DiD",
-        "market": "AU",
+        "id": args.profile_id or "mitsubishi-outlander-2016-4n14",
+        "manufacturer": args.manufacturer or "Mitsubishi",
+        "model": args.model or "Outlander",
+        "year": args.year or 2016,
+        "engine": args.engine or "4N14 2.2 DiD",
+        "market": args.market or "AU",
         # Evidence that this car is the one the offsets were verified against.
         # A different calibration or VIN prefix means different ECU software and
         # therefore possibly different block layouts.
@@ -219,6 +231,37 @@ def main():
             for lid, params in sorted(blocks.items())
         ],
     }
+
+    # Regenerating a profile must not silently discard human curation. Identity
+    # rules, roles and labels do not come from the ECU database, and sentinels
+    # are established by observing the car. Preserve them when updating.
+    if args.existing:
+        existing = json.load(open(args.existing, encoding="utf-8"))
+        for key in (
+            "id", "manufacturer", "model", "year", "engine", "market",
+            "calibrationIDs", "vinPrefixes", "identity", "roles",
+            "service", "transport", "standard", "notes",
+        ):
+            if key in existing:
+                profile[key] = existing[key]
+
+        old_sentinels = {}
+        for block in existing.get("blocks", []):
+            for parameter in block.get("parameters", []):
+                key = (
+                    block.get("lid"), parameter.get("itemNumber"),
+                    parameter.get("name"), parameter.get("byte"),
+                )
+                if "unavailableRaw" in parameter:
+                    old_sentinels[key] = parameter["unavailableRaw"]
+        for block in profile["blocks"]:
+            for parameter in block["parameters"]:
+                key = (
+                    block.get("lid"), parameter.get("itemNumber"),
+                    parameter.get("name"), parameter.get("byte"),
+                )
+                if key in old_sentinels:
+                    parameter["unavailableRaw"] = old_sentinels[key]
 
     with open(args.out, "w", encoding="utf-8") as handle:
         json.dump(profile, handle, indent=2, sort_keys=False)

@@ -103,10 +103,30 @@ public enum SessionStore {
         return try? JSONDecoder().decode(SessionManifest.self, from: data)
     }
 
+    /// Counts newline-terminated records without loading the file into memory.
+    /// Session summaries inspect every stored log, so this must stay cheap for
+    /// long recordings.
     public static func lineCount(at directory: URL, filename: String) -> Int {
         let url = directory.appendingPathComponent(filename)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
-        return text.split(separator: "\n", omittingEmptySubsequences: true).count
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? handle.close() }
+
+        var count = 0
+        var sawBytes = false
+        var lastByte: UInt8 = 0
+        do {
+            while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+                sawBytes = true
+                for byte in chunk where byte == 0x0A { count += 1 }
+                lastByte = chunk.last ?? lastByte
+            }
+        } catch {
+            return 0
+        }
+        // NDJSON writers always terminate a line, but tolerate a crashed final
+        // write so the count still reflects the visible record.
+        if sawBytes, lastByte != 0x0A { count += 1 }
+        return count
     }
 }
 

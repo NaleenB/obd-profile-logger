@@ -1,7 +1,10 @@
 # Vehicle profiles
 
-A profile is the only thing you need to support a new vehicle. The code is a
-generic engine; **all manufacturer-specific knowledge lives in these JSON files**.
+A profile is the main thing you need to support a new vehicle. The code is a
+generic engine; **manufacturer-specific decoding knowledge lives in these JSON
+files**. The built-in resource must still be registered in `ProfileCatalog` and the
+app project; that allow-list is deliberate, so a stray JSON file cannot become a
+vehicle candidate.
 
 That is deliberate. It means:
 
@@ -36,9 +39,14 @@ profiles/mitsubishi/triton-2019-4n15.json
 | `year` | int | yes | model year |
 | `engine` | string | yes | engine code and description |
 | `market` | string | no | ISO-ish market code, e.g. `AU` |
+| `calibrationIDs` | string[] | no | exact ECU software identifiers for matching |
 | `vinPrefixes` | string[] | no | known VIN prefixes for auto-identification |
+| `identity` | object | no | live-data evidence rules for identification |
 | `service` | object | yes | which diagnostic services the ECU implements |
+| `transport` | object | no | ELM protocol and module headers |
+| `standard` | array | no | standard OBD signals and scaling |
 | `notes` | string[] | no | caveats a human needs to know |
+| `roles` | object | no | optional meanings used by app features |
 | `blocks` | array | no | manufacturer-specific data blocks |
 
 ### `service`
@@ -89,6 +97,28 @@ needed per PID: `value = raw * factor + offset`, read big-endian over `bytes`
 
 This is what makes the tool work on a car it has never seen: a profile that lists
 PIDs `05`, `0C`, `0D` with their scaling will display them, with no code change.
+
+### `roles`
+
+Optional named meanings let the app present a profile without hard-coding a
+manufacturer's item numbers. A profile without roles remains decodable, but
+features that need one (odometer, DPF summary, priority polling) stay absent.
+
+```json
+"roles": {
+  "highlights": [119, 148, 155, 156],
+  "priorityLIDs": ["10"],
+  "tripSnapshotLIDs": ["03", "10", "11", "12"],
+  "odometer": { "lid": "03", "itemNumber": 145 },
+  "dpfTemperature": { "lid": "10", "itemNumber": 119 },
+  "sootByAccumulation": { "lid": "11", "itemNumber": 155 },
+  "sootByPressure": { "lid": "11", "itemNumber": 156 },
+  "regenerationCount": { "lid": "12", "itemNumber": 148 },
+  "regenerationMode": { "lid": "12", "itemNumber": 116 }
+}
+```
+
+Roles include a LID because item numbers are not guaranteed to be globally unique.
 
 ### `calibrationIDs` and `vinPrefixes`
 
@@ -146,10 +176,10 @@ Rules that matter:
 The app only displays manufacturer data after a profile is applied, so a profile
 that never matches costs nothing but a few probes.
 
-Both `transport` and `standard` are optional. Without them the app uses a generic
-baseline, auto-detects the protocol, and filters the list to whatever the car
-reports supporting — so an incomplete profile is a degraded result, never a
-broken one.
+`transport`, `standard`, `notes`, `roles` and `blocks` are optional. Without them
+the app uses a generic baseline, auto-detects the protocol, and filters the list
+to whatever the car reports supporting — so an incomplete profile is a degraded
+result, never a broken one.
 
 ### `blocks`
 
@@ -181,7 +211,7 @@ Each block is one request, keyed by its local identifier.
 | `length` | width in bytes, big-endian |
 | `factor`, `offset` | `value = raw * factor + offset` |
 | `unit` | engineering unit; omit when unknown rather than guessing |
-| `observed` | optional evidence from a real capture: the raw byte and decoded value |
+| `observed` | optional evidence from a real capture: the raw byte and the value **under the emitted factor/offset** |
 | `unavailableRaw` | optional list of raw values that mean **no measurement** — omit the parameter instead of showing the number |
 
 #### Sentinels are not readings
@@ -223,7 +253,8 @@ record which convention you verified and why.
 
 4. **Validate every parameter against a known physical value before trusting
    it.** A coolant reading of 39 °C while the dash shows 39 °C is proof; a
-   plausible-looking number is not.
+   plausible-looking number is not. The loader validates lengths, LIDs, scaling
+   and `observed` arithmetic, but it cannot prove the sensor meaning.
 5. Open a pull request with the profile and a short note describing how you
    validated it.
 

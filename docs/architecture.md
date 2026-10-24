@@ -4,7 +4,7 @@
 
 ```
 profiles/     Vehicle knowledge as data. The extension point for new cars.
-Core/         OBDCore  — models, health rules, decoders (no I/O)
+Core/         OBDCore  — models, health rules, decoders, file recorder
 Link/         OBDLink  — BLE transport and ELM327 client (Apple platforms)
 App/          SwiftUI app for iOS and macOS
 Probe/        macOS CLI used to discover what a vehicle supports
@@ -82,7 +82,9 @@ Three rules that came out of review:
    re-processing history rather than re-driving the car.
 
 DTC scanning is a step-at-a-time state machine interleaved with live polling, so
-a multi-second scan never stalls sampling.
+one complete scan does not block the polling loop for its whole duration. Each
+individual request still occupies the serialised adapter, so a timeout delays the
+next sample.
 
 ## Manufacturer data in the app
 
@@ -93,11 +95,11 @@ from it: the ELM protocol selector, the module headers used for DTC scans, and
 - the service `0x21` blocks. Nothing about a specific manufacturer is compiled in: the tile
 list, byte offsets and scaling all come from JSON.
 
-A full sweep of 76 local identifiers is stepped one per polling iteration, so it
-refreshes in the background over about a minute and never blocks live sampling.
-Values are cached by `lid:name` and only the parameters listed in
-`VehicleProfile.highlightItemNumbers` are shown, keeping the choice reviewable
-rather than inferred from names.
+A full sweep of 75 local identifiers is stepped one per polling iteration, so it
+refreshes in the background over about a minute. Values are cached by `lid:name`.
+Highlighted parameters, priority blocks, trip snapshots, odometer and DPF roles
+are declared in the profile's optional `roles` block, keeping the choice
+reviewable and owned by the vehicle data rather than compiled into the app.
 
 ## Graceful degradation
 
@@ -121,13 +123,16 @@ surfaced because it silently loses data.
 ## Profile selection
 
 Selecting a profile is not something a driver should have to think about. The app
-defaults to **Automatic** and decides at connect time:
+starts on generic OBD and applies a manufacturer profile only on evidence:
 
-1. Send one manufacturer request (`2111` to the engine ECU).
-2. Read the VIN (mode `09` PID `02`) and calibration ID (PID `04`).
-3. Use a manufacturer profile **only if** its `calibrationIDs` or `vinPrefixes`
-   match this car.
-4. Otherwise use the generic profile and say so in the UI.
+1. Read VIN (mode `09` PID `02`) and calibration ID (PID `04`).
+2. Prefer an exact calibration match, then the longest VIN-prefix match. If a
+   calibration ID was read but matches no profile, VIN alone is not enough.
+3. Otherwise decode only the evidence blocks declared by bundled profiles and
+   require the declared live-data discriminators to agree for three consecutive
+   probes.
+4. If none resolves, continue on standard OBD and retry on the documented
+   schedule while the ECU wakes.
 
 **Answering the service is not evidence that the offsets apply.** Service `0x21`
 is a transport: "return block *n*". What block *n* contains is defined by the ECU

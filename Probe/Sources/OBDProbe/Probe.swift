@@ -57,7 +57,6 @@ final class Probe {
             }
             try await pinProtocol()
             try await sweepIdentifiers(service: sweepService, budget: mode22Seconds)
-            try await readDTCs()
             try writeOutputs()
             return
         }
@@ -425,7 +424,7 @@ final class Probe {
             return
         }
 
-        let mids = Probe.expandBitmap(Array(bytes.prefix(4)), base: 0x00)
+        let mids = PIDCapabilities.expand(bitmap: Array(bytes.prefix(4)), base: 0x00).sorted()
         say("  Supported MIDs: " + (mids.isEmpty ? "none" : mids.map { String(format: "%02X", $0) }.joined(separator: " ")))
 
         var results: [String: String] = [:]
@@ -452,8 +451,8 @@ final class Probe {
     func runDPFCheck(profile: VehicleProfile, secondsPerPhase: TimeInterval) async throws {
         rule("DPF differential-pressure check")
 
-        guard let sensor = profileParameter(profile, item: 120),
-              let sootDiff = profileParameter(profile, item: 156) else {
+        guard profileParameter(profile, item: 120) != nil,
+              profileParameter(profile, item: 156) != nil else {
             throw ProbeError.noData("profile does not define items 120 and 156")
         }
 
@@ -569,25 +568,21 @@ final class Probe {
             say("  \(ok ? "OK  " : "FAIL") sensor zero within the +-2.5 kPa specification")
         }
 
-        var verdict = "inconclusive"
+        // A free-rev run is not a loaded-driving test. Exhaust flow in neutral
+        // is far below the flow a DPF sees under load, so a flat reading here
+        // proves nothing. Keep the capture for comparison, but do not grade the
+        // sensor from it.
+        let verdict = "inconclusive_free_rev"
         if revSpan < 300 {
             say("  n/a  engine speed barely changed (\(Int(revSpan)) rpm)")
-            say("       Without a spread in RPM the flow response cannot be tested.")
-            say("       Re-run and rev the engine whenever convenient during the window.")
+            say("       Without a spread in RPM the response cannot be observed.")
         } else if let maxSample, let minSample {
-            let rise = maxSample.dp - minSample.dp
-            if rise > 0.5 {
-                verdict = "responds"
-                say(String(format: "  OK   rises with exhaust flow (+%.2f kPa)", rise))
-                say("       Sensor and scaling are sound; the low differential-pressure")
-                say("       soot figure reflects the estimator, not a decode fault.")
-            } else {
-                verdict = "flat"
-                say(String(format: "  FAIL flat across %.0f rpm of range", revSpan))
-                say("       A sensor that does not move with flow cannot produce a")
-                say("       soot estimate. Treat that figure as unreliable.")
-            }
+            say(String(format: "  captured dP spread %.2f kPa across %.0f rpm",
+                       maxSample.dp - minSample.dp, revSpan))
         }
+        say("  n/a  free revving does not load the filter enough to characterise dP.")
+        say("       This run is evidence of sensor output, not a pass/fail verdict.")
+        say("       Characterise it from a loaded-driving log instead.")
 
         try? logger.writeJSON("dpf-check.json", [
             "noFlowKPa": zero as Any,
@@ -609,11 +604,21 @@ final class Probe {
 
     // MARK: - Mode 22 sweep
 
+    /// Services this tool is allowed to sweep. Every one of them reads.
+    ///
+    /// The allow-list is enforced here rather than only in argument parsing: the
+    /// probe workflow is also callable by tests and future front ends, and a
+    /// caller-selected service such as 2E or 31 could change ECU state.
+    static let readOnlySweepServices: Set<UInt8> = [0x21, 0x22, 0x1A]
+
     /// Read-only sweep of the UDS identifier space on the engine ECU.
     ///
     /// Nothing here writes to the ECU: 0x22 is ReadDataByIdentifier, 0x21 is
     /// ReadDataByLocalIdentifier, 0x1A is ReadECUIdentification. All read-only.
     private func sweepIdentifiers(service: UInt8, budget: TimeInterval) async throws {
+        guard Self.readOnlySweepServices.contains(service) else {
+            throw ProbeError.disallowedService(service)
+        }
         let serviceName = String(format: "%02X", service)
         rule("Service \(serviceName) identifier sweep (read-only)")
 
@@ -837,7 +842,7 @@ final class Probe {
             }
 
             let bitmap = Array(bytes.prefix(4))
-            let supported = Probe.expandBitmap(bitmap, base: pid)
+            let supported = PIDCapabilities.expand(bitmap: bitmap, base: pid)
             all.formUnion(supported)
 
             blocks.append([
@@ -865,17 +870,6 @@ final class Probe {
 
         say("")
         say("  \(candidates.count) PIDs advertised by the ECU.")
-    }
-
-    static func expandBitmap(_ bitmap: [UInt8], base: UInt8) -> [UInt8] {
-        var out: [UInt8] = []
-        for (byteIndex, byte) in bitmap.enumerated() {
-            for bit in 0..<8 where byte & (0x80 >> UInt8(bit)) != 0 {
-                let value = Int(base) + byteIndex * 8 + bit + 1
-                if value <= 0xFF { out.append(UInt8(value)) }
-            }
-        }
-        return out
     }
 
     // MARK: - Per-PID smoke test
@@ -925,71 +919,58 @@ final class Probe {
 
     /// Queries each module by name rather than trusting one broadcast reply.
     ///
-    /// Both the engine (7E8) and transmission (7E9) answer generic OBD on this
-    /// vehicle. Addressing them individually keeps each module's codes attached
-    /// to that module, and lets the report say when a module did not answer
-    /// instead of implying a clean bill of health.
+    /// Uses the shared Core scanner so the probe and the app agree on header
+    /// acknowledgement, per-query outcomes, and the difference between "no
+    /// codes" and "no answer".
     private func readDTCs() async throws {
         rule("Diagnostic trouble codes")
 
-        let targets: [(module: String, header: String)] = [
-            ("ECM", "7E0"),
-            ("TCM", "7E1")
-        ]
-
         _ = try? await elm.send("ATH0", timeout: 3)
+        var scanner = DTCScanner()
+        var headerErrors: [String] = []
 
-        var modules: [ModuleDiagnostics] = []
-
-        for target in targets {
-            _ = try? await elm.send("ATSH" + target.header, timeout: 3)
-
-            var milOn: Bool?
-            var reported: Int?
-
-            if let reply = try? await elm.send("0101", timeout: 3),
-               let hex = reply.payloadHex, hex.hasPrefix("4101"),
-               let bytes = bytesFromHex(String(hex.dropFirst(4))), bytes.count >= 2 {
-                milOn = (bytes[0] & 0x80) != 0
-                reported = Int(bytes[0] & 0x7F)
+        scan: while true {
+            switch scanner.next() {
+            case .finished:
+                break scan
+            case .request(let request):
+                let header = try? await elm.send("ATSH" + request.header, timeout: 3)
+                guard header?.isOK == true else {
+                    headerErrors.append(request.module)
+                    scanner.ingestHeaderFailure()
+                    continue
+                }
+                let reply = try? await elm.send(request.command, timeout: 5)
+                scanner.ingest(responseHex: reply?.payloadHex)
             }
+        }
 
-            let stored = await queryCodes(mode: "03")
-            let pending = await queryCodes(mode: "07")
-            let permanent = await queryCodes(mode: "0A")
+        _ = try? await elm.send("ATSH7DF", timeout: 3)
+        _ = try? await elm.send("ATAR", timeout: 3)
 
-            let module = ModuleDiagnostics(
-                module: target.module,
-                header: target.header,
-                milOn: milOn,
-                reportedDTCs: reported,
-                stored: stored,
-                pending: pending,
-                permanent: permanent
-            )
-            modules.append(module)
-
-            let milText = milOn.map { $0 ? "ON" : "off" } ?? "unknown"
-            say("  \(target.module) (7E\(target.header.hasSuffix("0") ? "8" : "9"))  MIL \(milText), \(reported ?? -1) reported")
-            say("      stored:    \(describe(stored))")
-            say("      pending:   \(describe(pending))")
-            say("      permanent: \(describe(permanent))")
+        let modules = scanner.diagnostics.modules
+        let diagnostics = scanner.diagnostics
+        for module in modules {
+            let milText = module.milOn.map { $0 ? "ON" : "off" } ?? "unknown"
+            say("  \(module.module) (\(module.header))  MIL \(milText), \(module.reportedDTCs.map(String.init) ?? "unknown") reported")
+            say("      stored:    \(describe(module.stored))")
+            say("      pending:   \(describe(module.pending))")
+            say("      permanent: \(describe(module.permanent))")
             if !module.isComplete {
                 say("      ! incomplete — a query did not answer or could not be decoded")
             }
         }
+        if !headerErrors.isEmpty {
+            say("      ! header selection failed for: \(headerErrors.joined(separator: ", "))")
+        }
 
-        // Restore broadcast addressing.
-        _ = try? await elm.send("ATSH7DF", timeout: 3)
-        _ = try? await elm.send("ATAR", timeout: 3)
-
-        let diagnostics = VehicleDiagnostics(modules: modules)
         say("")
         say("  \(diagnostics.headline)")
 
         dtcs = [
             "complete": diagnostics.isComplete,
             "incompleteModules": diagnostics.modulesIncomplete,
+            "outcomes": scanner.outcomeDetails,
             "modules": modules.map { module -> [String: Any] in
                 var entry: [String: Any] = [
                     "module": module.module,
@@ -998,9 +979,11 @@ final class Probe {
                 ]
                 if let value = module.milOn { entry["milOn"] = value }
                 if let value = module.reportedDTCs { entry["reportedDTCs"] = value }
-                entry["stored"] = module.stored ?? []
-                entry["pending"] = module.pending ?? []
-                entry["permanent"] = module.permanent ?? []
+                // Null means the query did not produce a usable answer. An empty
+                // array means the module answered with no codes.
+                entry["stored"] = module.stored ?? NSNull()
+                entry["pending"] = module.pending ?? NSNull()
+                entry["permanent"] = module.permanent ?? NSNull()
                 return entry
             }
         ]
@@ -1010,18 +993,6 @@ final class Probe {
             dtcs["freezeFramePID00"] = hex
             say("  Freeze frame → \(hex)")
         }
-    }
-
-    /// Returns decoded codes, or nil when the module did not answer or the reply
-    /// could not be interpreted.
-    private func queryCodes(mode: String) async -> [String]? {
-        guard let reply = try? await elm.send(mode, timeout: 5),
-              let hex = reply.payloadHex
-        else { return nil }
-
-        let header = "4" + String(mode.suffix(1))
-        guard hex.hasPrefix(header) else { return nil }
-        return DTCDecoder.codes(fromHex: String(hex.dropFirst(header.count)))
     }
 
     private func describe(_ codes: [String]?) -> String {

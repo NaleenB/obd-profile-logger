@@ -53,13 +53,13 @@ decode fault or a hardware fact. This mode tells you which, in three prompts:
 ```
 
 1. Ignition on, engine off — the sensor must read within +-2.5 kPa of zero
-2. Start the engine, idle — the reading should rise
-3. A 30-second free-rev window — rev whenever you like, no steady speed needed
+2. Start the engine, idle — capture the sensor output
+3. A 30-second free-rev window — capture the output across changing engine speed
 
-A sensor that never moves cannot produce a soot estimate, and the
-differential-pressure figure should then be treated as unreliable. If engine
-speed barely changes the run is reported as inconclusive rather than failed,
-because a flat reading at idle proves nothing.
+The run is deliberately reported as **inconclusive**. Exhaust flow while revving
+in neutral is much lower than under load, so a flat or rising free-rev trace does
+not establish that the sensor is healthy or failed. Characterise the sensor from
+a loaded-driving log instead. Do not treat this mode as a pass/fail test.
 
 Results are written to `dpf-check.json` in the run directory.
 
@@ -71,7 +71,9 @@ Results are written to `dpf-check.json` in the run directory.
 | `--ignition-wait <n>` | seconds to wait for the ECU, default 180 |
 | `--skip-ignition` | adapter-only probe, no ECU queries |
 | `--out <dir>` | results directory |
-| `--self-test` | verify the ELM327 parser against captured responses |
+| `--sweep-only` | run only handshake, protocol check and the identifier sweep |
+| `--service <hex>` | read-only sweep service: `22` (default), `21`, or `1A` |
+| `--self-test` | verify the ELM327 parser; exits non-zero on failure |
 
 ## Output
 
