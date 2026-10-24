@@ -358,9 +358,18 @@ final class LiveModel {
                 "method": resolution.method.rawValue,
                 "reason": resolution.reason
             ])
-            if let data = profileURL.flatMap({ try? Data(contentsOf: $0) }) {
+            let data = profileURL.flatMap { try? Data(contentsOf: $0) }
+            if let data {
                 try? session.replaceProfileCopy(with: data)
             }
+            // Write the manifest now, not only at stop: if this session is
+            // killed mid-recording, the manifest must still describe the
+            // samples it holds.
+            session.updateProfile(
+                id: id,
+                hash: data.map(ProfileFingerprint.hash(of:)),
+                match: resolution.method.rawValue
+            )
         }
         notice = "\(profileDisplayName(id)) profile applied (\(resolution.method.rawValue))."
     }
@@ -450,10 +459,32 @@ final class LiveModel {
 
     /// Sends a known manufacturer request and sees whether anything answers.
     /// One command, so it costs about a tenth of a second.
+    /// Timings for the pre-polling probe of service `0x21`, in milliseconds.
+    ///
+    /// Two `ATSH` commands costing seconds instead of milliseconds means the
+    /// adapter was still busy with an earlier reply, not that the car is slow —
+    /// a distinction the whole-connection total cannot make.
+    private var manufacturerProbeTimings: [String: String] = [:]
+
     private func detectManufacturerService(using elm: ELMClient) async -> Bool {
+        var timings: [String: String] = [:]
+        let probeStart = Date()
+
+        let headerStart = Date()
         _ = try? await elm.send("ATSH7E0", timeout: 2)
+        timings["selectHeaderMs"] = Self.millis(Date().timeIntervalSince(headerStart) * 1000)
+
+        let replyStart = Date()
         let reply = try? await elm.send("2111", timeout: 3)
+        timings["mutReplyMs"] = Self.millis(Date().timeIntervalSince(replyStart) * 1000)
+
+        let restoreStart = Date()
         _ = try? await elm.send("ATSH7DF", timeout: 2)
+        timings["restoreHeaderMs"] = Self.millis(Date().timeIntervalSince(restoreStart) * 1000)
+
+        timings["probeTotalMs"] = Self.millis(Date().timeIntervalSince(probeStart) * 1000)
+        manufacturerProbeTimings = timings
+
         guard let hex = reply?.payloadHex else { return false }
         return hex.hasPrefix("6111")
     }
@@ -665,7 +696,7 @@ final class LiveModel {
                     "elmMs": Self.millis(elmMs),
                     "discoveryMs": Self.millis(discoveryMs),
                     "totalMs": Self.millis(Date().timeIntervalSince(started) * 1000)
-                ])
+                ].merging(manufacturerProbeTimings) { current, _ in current })
                 startPolling()
             } catch {
                 phase = .failed("\(error)")

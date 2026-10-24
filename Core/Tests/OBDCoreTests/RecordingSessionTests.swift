@@ -88,6 +88,25 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(archived.contains("mitsubishi-outlander-2016-4n14"))
     }
 
+    /// A session killed mid-recording must not keep the manifest written at
+    /// start. That is how an interrupted session ended up claiming the generic
+    /// profile while its own `profile.json` was the vehicle's.
+    func testManifestChangesReachDiskBeforeTheSessionEnds() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        session.updateProfile(id: "generic-iso15765-can", hash: nil, match: "none")
+        session.updateProfile(id: "mitsubishi-outlander-2016-4n14", hash: "abc123", match: "calibration")
+
+        // No stop: this is the state a killed process leaves behind.
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.vehicleProfileID, "mitsubishi-outlander-2016-4n14")
+        XCTAssertEqual(written.profileHash, "abc123")
+        XCTAssertEqual(written.profileMatch, "calibration")
+        XCTAssertNil(written.finishedAt, "an unfinished session must not look finished")
+    }
+
     /// Exactly one start event, even when the caller supplies metadata.
     func testStartWritesExactlyOneStartEvent() throws {
         let session = RecordingSession()

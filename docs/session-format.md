@@ -53,6 +53,11 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 
 Nothing is invented. A value the app could not determine is omitted or null.
 
+The manifest is rewritten whenever one of these becomes known during the session,
+not only when it closes. A session that is killed mid-recording therefore still
+describes what its samples were decoded with — which is the session most worth
+reading later. `finishedAt` absent means the recording did not close cleanly.
+
 ## samples.ndjson
 
 One successful observation per line. There is deliberately no "all signals at
@@ -112,6 +117,12 @@ discovery (or direct retrieval of the known adapter), BLE setup, ELM
 initialisation, capability discovery, and — in a second event — the time from
 starting the connection to the first live sample. It exists because "the phone
 connects slowly" is otherwise unfalsifiable.
+
+The `connected` event also carries the probe of manufacturer service `0x21`,
+split by command: `selectHeaderMs`, `mutReplyMs`, `restoreHeaderMs` and
+`probeTotalMs`. Two header commands costing seconds rather than milliseconds is
+the signature of an adapter still busy with an earlier reply, which is a
+different problem from a slow car and is invisible in a single total.
 
 `profile_changed` marks the boundary where a vehicle profile was applied. The app
 starts on generic OBD and may identify the car while recording, once the ECU wakes

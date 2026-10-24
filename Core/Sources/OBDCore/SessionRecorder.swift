@@ -184,12 +184,26 @@ public final class SessionRecorder {
         return problems.isEmpty ? .completed : .incomplete(problems.joined(separator: "; "))
     }
 
-    /// Mutate the manifest while the session is open. Used for values that only
-    /// become known later, such as the odometer at stop.
+    /// Mutate the manifest while the session is open, and write it straight away.
+    ///
+    /// Persisting on every change rather than only at `finish` is deliberate: a
+    /// session killed mid-recording used to keep the manifest written at start,
+    /// so it still claimed the generic profile while its own `profile.json` and
+    /// samples were decoded with the vehicle's. An interrupted session is the
+    /// one most worth reading later, so it must not lie about what produced it.
+    /// These changes are rare — a profile resolves once, the odometer once — so
+    /// the write cost is irrelevant next to a sample stream.
     public func updateManifest(_ change: (inout SessionManifest) -> Void) {
         lock.lock()
         defer { lock.unlock() }
         change(&manifest)
+        guard !closed else { return }
+        // Best effort: a manifest that cannot be written is already reported by
+        // `finish`, and losing the recording over it would be worse.
+        try? JSONEncoder.pretty
+            .encode(manifest)
+            .write(to: directory.appendingPathComponent(Self.manifestFilename()),
+                   options: .atomic)
     }
 
     public var isClosed: Bool {

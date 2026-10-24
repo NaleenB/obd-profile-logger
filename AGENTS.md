@@ -208,6 +208,14 @@ Each of these has already caused a wrong conclusion.
 - **The main screen scrolls because it is wrapped in a `ScrollView`, not because
   it worked before.** "It stopped scrolling" was reported as evidence of a hang;
   the screen had no scroll view at all.
+- **An interrupted session used to lie about its own profile.** Manifest fields
+  were only written by `finish`, so a killed recording kept the connect-time
+  `generic-iso15765-can` / `none` while `profile.json` and every manufacturer
+  sample were the Outlander's. `updateManifest` now writes as it changes; if a
+  manifest again disagrees with `profile.json`, that write has regressed.
+- **The TCM stops answering within a second or two of the engine stopping**, well
+  before the ECM does. DTC scans after shutdown are honestly `incomplete` — that
+  is the car, not a lost scan. Scan while the engine is running.
 
 ## Status — what is proven
 
