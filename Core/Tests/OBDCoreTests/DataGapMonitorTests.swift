@@ -70,6 +70,25 @@ final class DataGapMonitorTests: XCTestCase {
                        .ended(gapSeconds: 70, reason: .stalled))
     }
 
+    /// A link can disappear before the gap threshold has elapsed. The monitor
+    /// must not be reset on reconnection: once the total outage crosses the
+    /// threshold it is still a gap, and only a genuine sample closes it.
+    func testAnOutageThatCrossesTheThresholdAfterReconnectIsStillRecorded() {
+        var monitor = DataGapMonitor(threshold: 10)
+        let lastSample = start
+        // Five seconds of silence at link loss: below the gap threshold.
+        XCTAssertNil(monitor.update(now: lastSample.addingTimeInterval(5),
+                                    lastSampleAt: lastSample))
+        // Reconnection took long enough that the total outage is now 11 seconds.
+        XCTAssertEqual(monitor.update(now: lastSample.addingTimeInterval(11),
+                                      lastSampleAt: lastSample),
+                       .started(quietFor: 11))
+        // The first actual sample after reconnection is the resumption.
+        let resumed = lastSample.addingTimeInterval(13)
+        XCTAssertEqual(monitor.update(now: resumed, lastSampleAt: resumed),
+                       .ended(gapSeconds: 13, reason: .resumed))
+    }
+
     /// Only `update` observing a fresh sample may end a gap by resumption.
     func testOnlyAnArrivingSampleIsAResumption() {
         var monitor = DataGapMonitor(threshold: 10)

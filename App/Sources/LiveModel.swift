@@ -65,6 +65,11 @@ final class LiveModel {
     private var batteryLogged = false
     private var runningSince: Date?
     private var gapMonitor = DataGapMonitor(threshold: 10)
+    /// Survives `readings.clear()` so a link outage can still be represented as
+    /// a data gap after reconnection. `readings.lastUpdate` alone cannot do this
+    /// because disconnect deliberately clears stale displayed values.
+    private var lastSampleAt: Date?
+    private var firstSampleAt: Date?
     private var identity = VehicleIdentity()
     private var identityResolved = false
     private var odometerKm: Int?
@@ -420,15 +425,10 @@ final class LiveModel {
         guard !verificationDone,
               manufacturerServiceAvailable,
               let profile, let spec = profile.identity,
-              let rpm = lastRPM, rpm > 400,
+              let lastRPM, lastRPM > 400,
               Date().timeIntervalSince(lastVerificationAttempt) >= 30
         else { return }
         lastVerificationAttempt = Date()
-
-        var standard: [UInt8: Double] = [0x0C: rpm]
-        if let coolant = await readStandard(0x05, using: elm) {
-            standard[0x05] = coolant
-        }
 
         var values: [Int: Double] = [:]
         _ = try? await elm.send("ATSH7E0", timeout: 2)
@@ -444,6 +444,19 @@ final class LiveModel {
         }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
 
+        guard isCurrent(generation) else { return }
+
+        // Read the reference immediately after the manufacturer frames. Using
+        // `lastRPM` from several seconds earlier made normal idle fluctuation
+        // look like a layout disagreement.
+        guard let rpm = await readStandard(0x0C, using: elm), rpm > 400 else {
+            // A failed fresh read proves nothing. Try again after the throttle.
+            return
+        }
+        var standard: [UInt8: Double] = [0x0C: rpm]
+        if let coolant = await readStandard(0x05, using: elm) {
+            standard[0x05] = coolant
+        }
         guard isCurrent(generation) else { return }
         // Without both sides of the comparison there is nothing to judge. Try
         // again later rather than calling an unanswered probe a pass.
@@ -698,6 +711,8 @@ final class LiveModel {
                 runningSince = nil
                 discoveryRetryDone = false
                 gapMonitor = DataGapMonitor(threshold: 10)
+                lastSampleAt = nil
+                firstSampleAt = nil
                 didInitialReads = false
                 engineStoppedSince = nil
 
@@ -764,6 +779,9 @@ final class LiveModel {
         scanner = nil
         transport.shutdown()
         elm = nil
+        // Capture this before clearing readings: a gap is not ended by the link
+        // dropping, and the last genuine answer is what defines its duration.
+        lastSampleAt = lastUpdate ?? lastSampleAt
         readings.clear()
         dpf = nil
         lastRPM = nil
@@ -773,9 +791,6 @@ final class LiveModel {
         supplyVolts = nil
 
         session.event(.adapterDisconnected, ["reason": reason])
-        // Not a resumption: the vehicle may never have answered. The gap is
-        // closed with the reason it actually ended for.
-        reportGapTransition(gapMonitor.finish(now: Date(), reason: .linkDown))
 
         // The link dropping is usually distance, not a decision. Keep the
         // session open and try to pick it back up.
@@ -856,6 +871,8 @@ final class LiveModel {
             var delay: UInt64 = 2_000_000_000
 
             while self.isCurrent(generation), Date() < deadline {
+                self.reportGapTransition(
+                    self.gapMonitor.update(now: Date(), lastSampleAt: self.lastSampleAt))
                 attempt += 1
                 self.status = "Reconnecting… (attempt \(attempt))"
 
@@ -895,7 +912,6 @@ final class LiveModel {
                         "adapterConnectMs": Self.millis(link.connectMs),
                         "adapterRescanned": link.rescanned ? "true" : "false"
                     ])
-                    self.gapMonitor = DataGapMonitor(threshold: 10)
                     self.startPolling(generation: generation)
                     self.reconnectTask = nil
                     return
@@ -907,6 +923,7 @@ final class LiveModel {
             }
 
             guard self.isCurrent(generation) else { return }
+            self.reportGapTransition(gapMonitor.finish(now: Date(), reason: .linkDown))
             self.stopRecording(reason: "reconnect_timeout")
             self.phase = .failed("Adapter disconnected")
             self.status = "Adapter disconnected"
@@ -1244,6 +1261,7 @@ final class LiveModel {
         stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
+        lastSampleAt = lastUpdate ?? lastSampleAt
         reportGapTransition(gapMonitor.finish(now: Date(), reason: .stalled))
         // A half-finished scan belongs to the connection that died. Carrying it
         // across the reconnect would assemble one result from two buses.
@@ -1333,7 +1351,9 @@ final class LiveModel {
                 // last sample and not from a success: measuring silence inside
                 // the success path always read zero, so a sleeping ECU left no
                 // data_gap in the log and looked like a frozen app.
-                reportGapTransition(gapMonitor.update(now: Date(), lastSampleAt: lastUpdate))
+                reportGapTransition(gapMonitor.update(
+                    now: Date(),
+                    lastSampleAt: lastUpdate ?? lastSampleAt))
 
                 let reference = lastUpdate ?? connectedAt
                 let quiet = silence.shouldPollQuietly(now: Date(), reference: reference)
@@ -1431,8 +1451,7 @@ final class LiveModel {
 
         // One-time enrichment, once the bus is actually answering. Doing
         // this before polling was what delayed the first live reading.
-        if !didInitialReads, isRecording, let firstSampleAt = lastUpdate,
-           Date().timeIntervalSince(firstSampleAt) < 5 {
+        if !didInitialReads, isRecording, let firstSampleAt {
             didInitialReads = true
             // Measure the metric this event promises before enrichment adds
             // DPF and trip-snapshot round trips.
@@ -1468,6 +1487,14 @@ final class LiveModel {
     }
 
     /// One live signal. A failed read writes nothing: absence is meaningful.
+    /// Records that the vehicle actually answered. This is the only path that
+    /// may close a data gap as `data_resumed`.
+    private func noteSample(at date: Date = Date()) {
+        if firstSampleAt == nil { firstSampleAt = date }
+        lastSampleAt = date
+        reportGapTransition(gapMonitor.update(now: date, lastSampleAt: date))
+    }
+
     private func sample(
         _ signal: VehicleProfile.StandardSignal,
         using elm: ELMClient,
@@ -1483,7 +1510,9 @@ final class LiveModel {
         else { return }
         guard isCurrent(generation) else { return }
 
-        readings.setStandard(pid: signal.pid, value: value, at: Date())
+        let sampleTime = Date()
+        readings.setStandard(pid: signal.pid, value: value, at: sampleTime)
+        noteSample(at: sampleTime)
 
         // The ECU may have been asleep when we probed. Now that it is answering,
         // ask again so an unnecessary empty capability set is not recorded.
@@ -1590,8 +1619,9 @@ final class LiveModel {
             guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { continue }
 
             let decodedValues = profile.decode(frame)
+            let sampleTime = Date()
             for decoded in decodedValues {
-                readings.setManufacturer(decoded, at: Date())
+                readings.setManufacturer(decoded, at: sampleTime)
                 if isRecording {
                     let written = session.manufacturerSample(
                         lid: decoded.lid,
@@ -1604,6 +1634,7 @@ final class LiveModel {
                     if !written { syncRecordingState() }
                 }
             }
+            if !decodedValues.isEmpty { noteSample(at: sampleTime) }
             if let temperature = profile.roles?.dpfTemperature?.value(in: decodedValues) {
                 trackRegeneration(dpfTemperature: temperature)
             }
@@ -1648,9 +1679,10 @@ final class LiveModel {
 
         sweep.recordAnswer(lid)
         let decodedValues = profile.decode(frame)
+        let sampleTime = Date()
 
         for decoded in decodedValues {
-            readings.setManufacturer(decoded, at: Date())
+            readings.setManufacturer(decoded, at: sampleTime)
             if isRecording {
                 let written = session.manufacturerSample(
                     lid: decoded.lid,
@@ -1663,6 +1695,7 @@ final class LiveModel {
                 if !written { syncRecordingState() }
             }
         }
+        if !decodedValues.isEmpty { noteSample(at: sampleTime) }
         refreshDPFSummary()
     }
 

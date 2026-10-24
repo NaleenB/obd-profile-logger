@@ -137,8 +137,9 @@ an adapter still busy with an earlier reply, which is a different problem from a
 slow car and is invisible in a single total.
 
 A second `startup_timing` event with `phase: first_sample` records
-`sinceConnectMs`: connection start to the first live sample. That is the number a
-driver feels.
+`sinceConnectMs`: connection start to the first successful observation. It uses
+the timestamp of that observation, not the end of the polling cycle, so later
+manufacturer reads cannot inflate it. That is the number a driver feels.
 
 `profile_changed` marks the boundary where a vehicle profile was applied. The app
 starts on generic OBD and may identify the car while recording, once the ECU wakes
@@ -157,13 +158,13 @@ answering while recording continued — usually ignition off. The adapter stays
 connected in that case, because OBD pin 16 is permanent battery power and the
 dongle never loses power; only the ECU sleeps.
 
-A gap ends in one of two ways, and they are different events.
 `data_resumed` means a sample from the vehicle arrived. `data_gap_ended` means
 the gap closed for any other reason, and carries `reason`: `link_down` (the
-Bluetooth link dropped), `stalled` (the polling loop was reset) or
-`recording_stopped`. A gap that spans a disconnect therefore never reports a
-resumption that did not happen — which matters because these events are what a
-silent log is diagnosed with.
+reconnect window expired), `stalled` (the polling loop was reset) or
+`recording_stopped`. A gap that spans a disconnect is preserved until a genuine
+sample arrives, so the outage is not erased merely because the link returned and
+the first sample is never claimed as proof that data was available while the link
+was down.
 
 While a gap is open the app stops asking the full signal list — every request
 would go unanswered — and instead reads the adapter's own supply voltage (`ATRV`,
@@ -193,14 +194,16 @@ available. A regeneration still running when the session ends is closed with
 `truncated: true` rather than dropped.
 
 When the link drops during a recording, the session is **not** closed. The app
-records `adapter_disconnected`, closes any open gap with `data_gap_ended` and
-`reason: link_down`, and retries the connection for up to ten minutes with
-backoff. Reconnection uses the same remembered-adapter-first, rescan-on-failure
-path as the first connection (`adapter_rescanned` in `adapter_reconnected`), so a
-peripheral that has gone stale cannot block recovery. On success it writes `adapter_reconnected` and
+records `adapter_disconnected` and retries the connection for up to ten minutes
+with backoff. An open data gap stays open across the reconnect; if the outage
+crosses the ten-second threshold while reconnecting, `data_gap` is emitted. Only
+a genuine sample after reconnection produces `data_resumed`. Reconnection uses
+the same remembered-adapter-first, rescan-on-failure path as the first connection
+(`adapter_rescanned` in `adapter_reconnected`), so a peripheral that has gone
+stale cannot block recovery. On success it writes `adapter_reconnected` and
 continues the same session, so a walk out of range and back produces one file
-rather than two. If the ten minutes expire the session is stopped with reason
-`reconnect_timeout`.
+rather than two. If the ten minutes expire, a still-open gap ends with
+`reason: link_down` and the session is stopped with reason `reconnect_timeout`.
 
 `adapter_disconnected` means the *link* dropped (out of range, unplugged, module
 reset). It does **not** by itself stop the recording: the app retries and, if it

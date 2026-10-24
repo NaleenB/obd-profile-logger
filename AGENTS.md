@@ -199,7 +199,8 @@ Each of these has already caused a wrong conclusion.
   before guessing: a slow scan and a slow ECU look identical without them. Every
   field there is a stage duration except `totalMs`; the manufacturer probe is
   split by command because two header commands costing seconds means a busy
-  adapter, not a slow car.
+  adapter, not a slow car. `first_sample` must use the first successful
+  observation's timestamp, not `lastUpdate` after enrichment.
 - **One battery report per engine cycle, not per connection.** The monitor resets
   after the engine has been stopped for five seconds, so a restart in the same
   connection is measured again.
@@ -227,7 +228,10 @@ Each of these has already caused a wrong conclusion.
 - **A data gap ends for a reason, and only one of them is a resumption.** A link
   drop while the car was already silent used to be written as `data_resumed`,
   which made the log claim data that never arrived. `data_resumed` now requires a
-  sample; anything else is `data_gap_ended` with a `reason`.
+  sample; anything else is `data_gap_ended` with a `reason`. Preserve the last
+  genuine sample and the gap monitor across reconnection: an outage shorter than
+  ten seconds at link loss can still cross the threshold while reconnecting, and
+  resetting the monitor erases it from the log.
 - **A scan and a connection are one unit.** The scanner is dropped on a link
   loss or a stall, and a cancelled poll task does not commit a step it was
   waiting on. Keeping either would stitch two connections into one DTC result.
