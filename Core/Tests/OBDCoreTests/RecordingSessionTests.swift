@@ -48,6 +48,23 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(events.first?["type"] as? String, "session_started")
     }
 
+    /// Discovery can fail at connect and succeed once the ECU wakes. The
+    /// manifest is first written at start, so the stop path has to correct it.
+    func testDiscoveryIsRecordedAsItEndedNotAsItStarted() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        session.updateDiscovery(capabilityDiscovery: "succeeded", supportedPIDs: ["0C", "0D"])
+        session.appendNote("Capability discovery did not answer at session start and succeeded once the ECU was awake.")
+        session.stop(reason: "test")
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.capabilityDiscovery, "succeeded")
+        XCTAssertEqual(written.supportedPIDs, ["0C", "0D"])
+        XCTAssertTrue(written.notes.contains { $0.contains("did not answer at session start") })
+    }
+
     /// Exactly one start event, even when the caller supplies metadata.
     func testStartWritesExactlyOneStartEvent() throws {
         let session = RecordingSession()
