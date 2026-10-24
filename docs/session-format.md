@@ -36,8 +36,8 @@ Written at start, rewritten at stop with `finishedAt` and counts.
 | `appVersion` | build that wrote the session |
 | `vehicleProfileID` | profile assumed by this build, or null |
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
-| `supportedPIDs` | full capability set discovered at connect; null when discovery failed |
-| `capabilityDiscovery` | `succeeded` or `failed` — an empty list alone cannot say which |
+| `supportedPIDs` | full capability set discovered during the session; null when discovery never succeeded |
+| `capabilityDiscovery` | `succeeded` or `failed` — written at stop, so a cold start that resolved once the ECU woke records `succeeded` |
 | `profileHash` | SHA-256 of the profile JSON used, so a decode change is detectable |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
 | `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval |

@@ -57,6 +57,27 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertEqual(mode.value, 0, accuracy: 0.001)
     }
 
+    /// A field pinned at the ECU's clamp is the absence of a measurement. Raw
+    /// 230 decodes to 950 °C on this car's NTC input, which is not fitted, and
+    /// on the stored maximum fields. Showing 950 would invent a reading.
+    func testSentinelValuesAreOmittedRatherThanShown() throws {
+        let profile = try shippedProfile()
+
+        // LID 0x10, byte 7 (NTC) at 0xE6 = 230.
+        let pinned = try XCTUnwrap(MUT21Frame(hex: "61103233301400E6"))
+        let decoded = profile.decode(pinned)
+        XCTAssertNil(decoded.first { $0.itemNumber == 511 })
+        XCTAssertNotNil(decoded.first { $0.itemNumber == 117 }, "the other temperatures still decode")
+
+        // The same frame with a real reading keeps the parameter.
+        let real = try XCTUnwrap(MUT21Frame(hex: "6110323330140030"))
+        XCTAssertNotNil(profile.decode(real).first { $0.itemNumber == 511 })
+
+        // LID 0x12, byte 3 = stored DPF maximum.
+        let storedMax = try XCTUnwrap(MUT21Frame(hex: "6112B1E6007B00E60000000000"))
+        XCTAssertNil(profile.decode(storedMax).first { $0.itemNumber == 127 })
+    }
+
     func testUnknownLIDDecodesToNothing() throws {
         let profile = try shippedProfile()
         let frame = try XCTUnwrap(MUT21Frame(hex: "61FF00"))

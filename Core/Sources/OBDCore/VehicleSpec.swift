@@ -163,6 +163,15 @@ public enum VehicleSpec {
     public static let restingVoltsHealthy: ClosedRange<Double> = 12.2...12.9
     public static let restingVoltsSuspect: Double = 12.0
 
+    /// Voltage with the ignition on and the engine not yet turning.
+    ///
+    /// Glow plugs and other loads are drawing current, so this is *not* a
+    /// resting measurement: a healthy battery sags to roughly 11.8 V here.
+    /// Applying `restingVoltsHealthy` to it flags healthy batteries, which is
+    /// why this band exists separately.
+    public static let ignitionOnVoltsHealthy: Double = 11.8
+    public static let ignitionOnVoltsSuspect: Double = 11.2
+
     /// Minutes the vehicle must have been off before a voltage reading counts
     /// as a resting measurement rather than a surface-charge artefact.
     public static let restingSettleMinutes: Int = 30

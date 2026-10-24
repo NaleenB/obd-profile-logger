@@ -164,15 +164,33 @@ public final class BatteryMonitor {
         var findings: [Finding] = []
 
         if let pre = preCrankVolts {
-            let low = pre < VehicleSpec.restingVoltsHealthy.lowerBound
+            // This reading is taken with the ignition on, so glow plugs and
+            // other loads are already drawing current. Comparing it with the
+            // resting band would call a healthy battery marginal.
+            let severity: Severity
+            if pre >= VehicleSpec.ignitionOnVoltsHealthy {
+                severity = .ok
+            } else if pre >= VehicleSpec.ignitionOnVoltsSuspect {
+                severity = .watch
+            } else {
+                severity = .suspect
+            }
+            let message: String
+            switch severity {
+            case .ok:
+                message = String(format: "%.1f V with the ignition on (healthy is above %.1f V under load)",
+                                 pre, VehicleSpec.ignitionOnVoltsHealthy)
+            case .watch:
+                message = String(format: "%.1f V with the ignition on — lower than expected before cranking", pre)
+            case .suspect, .insufficientData:
+                message = String(format: "%.1f V with the ignition on — the battery is weak before cranking", pre)
+            }
             findings.append(Finding(
                 key: "pre_crank_voltage",
                 label: "Voltage before cranking",
-                severity: low ? .watch : .ok,
-                message: low
-                    ? String(format: "%.1f V before cranking — low for a battery about to work", pre)
-                    : String(format: "%.1f V before cranking", pre),
-                source: .heuristic("12.2 V is the 50% state-of-charge point"),
+                severity: severity,
+                message: message,
+                source: .heuristic("measured with the ignition on, so loads are present; a resting reading would sit 0.3-0.5 V higher"),
                 observed: pre,
                 unit: "V"
             ))

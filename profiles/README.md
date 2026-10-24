@@ -117,7 +117,8 @@ Each block is one request, keyed by its local identifier.
       "factor": 0.05,
       "offset": 0,
       "unit": "g/L",
-      "observed": { "raw": 52, "value": 2.6 }
+      "observed": { "raw": 52, "value": 2.6 },
+      "unavailableRaw": [230]
     }
   ]
 }
@@ -131,6 +132,17 @@ Each block is one request, keyed by its local identifier.
 | `factor`, `offset` | `value = raw * factor + offset` |
 | `unit` | engineering unit; omit when unknown rather than guessing |
 | `observed` | optional evidence from a real capture: the raw byte and decoded value |
+| `unavailableRaw` | optional list of raw values that mean **no measurement** — omit the parameter instead of showing the number |
+
+#### Sentinels are not readings
+
+Some fields are pinned at a value the ECU uses for "not fitted" or "not set". On
+the Outlander, raw `230` decodes to 950 °C on an NTC input the car does not have,
+and on the stored-maximum fields; the live temperatures in the same block read
+normally and the regeneration history peaks at 620–720 °C, so 950 is not a
+measurement. Listing the raw value in `unavailableRaw` makes the app drop the
+parameter rather than display a fabricated number. If the sensor starts reading
+a real value, the parameter reappears on its own.
 
 #### The `byte` convention is not obvious
 

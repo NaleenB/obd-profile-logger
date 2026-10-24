@@ -344,6 +344,9 @@ final class LiveModel {
     private(set) var supportedPIDs: Set<UInt8> = []
     private(set) var discovery: DiscoveryState = .notRun
     private var discoveryRetryDone = false
+    /// Discovery state when the manifest was first written. A cold start can
+    /// fail here and succeed later, so the stop path records the final result.
+    private var discoveryAtRecordingStart: DiscoveryState = .notRun
 
     /// Module headers for DTC scans. Falls back to the near-universal CAN
     /// engine/transmission pair when a profile does not say.
@@ -574,6 +577,7 @@ final class LiveModel {
 
     func startRecording() {
         guard !isRecording else { return }
+        discoveryAtRecordingStart = discovery
 
         let profileData = profileURL.flatMap { try? Data(contentsOf: $0) }
         let profileHash = profileData.map(ProfileFingerprint.hash(of:))
@@ -635,6 +639,18 @@ final class LiveModel {
             ])
         }
         emitCachedSnapshot(phase: "end")
+        // Record what discovery actually achieved during the session. Writing
+        // only the connect-time result would report "failed" for a cold start
+        // that resolved itself once the ECU woke.
+        session.updateDiscovery(
+            capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            supportedPIDs: discovery == .succeeded
+                ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
+                : nil
+        )
+        if discoveryAtRecordingStart != .succeeded, discovery == .succeeded {
+            session.appendNote("Capability discovery did not answer at session start and succeeded once the ECU was awake.")
+        }
         session.updateOdometer(end: odometerKm)
         let result = session.stop(reason: reason)
         lastSessionEnd = Date()

@@ -30,6 +30,41 @@ final class BatteryMonitorTests: XCTestCase {
         XCTAssertEqual(r.verdict, .ok)
     }
 
+    /// The reading before cranking is taken with the ignition on, under glow
+    /// plug load. 12.08 V is healthy there and must not be judged against the
+    /// resting band, which would call it marginal.
+    func testIgnitionOnVoltageBelowRestingBandIsNotFlagged() {
+        let m = BatteryMonitor()
+        feed(m, [
+            (0, 12.08, 0),
+            (400, 12.05, 0),
+            (800, 10.2, 160),
+            (1400, 9.9, 240),
+            (1900, 13.9, 690),
+            (2600, 14.22, 700),
+            (5000, 14.2, 695)
+        ])
+        let r = m.report()
+        let pre = r.findings.first { $0.key == "pre_crank_voltage" }
+        XCTAssertEqual(pre?.severity, .ok)
+        XCTAssertEqual(r.verdict, .ok)
+    }
+
+    /// A battery that sits below the ignition-on band is worth watching; the
+    /// crank minimum decides whether it is failing.
+    func testWeakIgnitionOnVoltageIsFlagged() {
+        let m = BatteryMonitor()
+        feed(m, [
+            (0, 11.4, 0),
+            (500, 11.3, 0),
+            (900, 10.4, 160),
+            (1500, 14.0, 690),
+            (3000, 14.1, 700)
+        ])
+        let pre = m.report().findings.first { $0.key == "pre_crank_voltage" }
+        XCTAssertEqual(pre?.severity, .watch)
+    }
+
     /// A battery that sags below 9 V under load is failing.
     func testFailingCrankIsSuspect() {
         let m = BatteryMonitor()

@@ -160,6 +160,11 @@ Each of these has already caused a wrong conclusion.
 - **Cranking minimums are sampled, so they can only be too high.** Do not claim a
   threshold was cleared from a 2 Hz capture.
 - **Ignition-on voltage is not a resting measurement** (glow plugs plus ECU load).
+  The battery check compares it against 11.8 V, not the 12.2 V resting band.
+- **Raw `230` is a sentinel, not 950 °C.** It appears on the NTC input this car
+  does not have and on the stored-maximum fields, while live temperatures read
+  normally and regen peaks sit at 620–720 °C. Those parameters declare
+  `unavailableRaw` so they are dropped instead of shown.
 - **Regeneration thresholds (450 °C start, 300 °C end) are conventional**, not
   measured on this car.
 - **Two session events can mean one trip.** A dropped link now reconnects and

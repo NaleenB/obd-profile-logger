@@ -492,6 +492,7 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
+          "unavailableRaw": [230],
           "observed": {
             "raw": 230,
             "value": 950.0
@@ -580,6 +581,7 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
+          "unavailableRaw": [230],
           "observed": {
             "raw": 230,
             "value": 950.0
@@ -617,6 +619,7 @@
           "factor": 5.0,
           "offset": -200.0,
           "unit": "degC",
+          "unavailableRaw": [230],
           "observed": {
             "raw": 230,
             "value": 950.0

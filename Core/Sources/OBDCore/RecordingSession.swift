@@ -58,6 +58,23 @@ public final class RecordingSession {
         recorder.updateManifest { $0.odometerEndKm = end }
     }
 
+    /// Discovery can fail at connect, while the ECU is still asleep, and succeed
+    /// once it answers. Record the outcome that held for the session rather than
+    /// the state at the moment the manifest was first written.
+    public func updateDiscovery(capabilityDiscovery: String, supportedPIDs: [String]?) {
+        guard let recorder else { return }
+        recorder.updateManifest {
+            $0.capabilityDiscovery = capabilityDiscovery
+            $0.supportedPIDs = supportedPIDs
+        }
+    }
+
+    /// Appends a note for something that changed after the session started.
+    public func appendNote(_ note: String) {
+        guard let recorder else { return }
+        recorder.updateManifest { $0.notes.append(note) }
+    }
+
     /// Stops recording and returns what actually happened. A partial session is
     /// reported as `.incomplete`, never as saved.
     @discardableResult

@@ -72,6 +72,10 @@ public struct VehicleProfile: Codable, Equatable {
         public let offset: Double
         public let unit: String?
         public let observed: Observed?
+        /// Raw values that mean "no measurement", not a reading: a sensor the
+        /// vehicle does not have, or a field the ECU leaves at its clamp.
+        /// Parameters matching these are omitted rather than shown as a number.
+        public let unavailableRaw: [Int]?
     }
 
     public struct Block: Codable, Equatable {
@@ -177,6 +181,10 @@ public extension VehicleProfile {
         }
         return block.parameters.compactMap { parameter in
             guard let raw = frame.value(at: parameter.byte, length: parameter.length) else {
+                return nil
+            }
+            // A pinned sentinel is the absence of a measurement, not a reading.
+            if let unavailable = parameter.unavailableRaw, unavailable.contains(raw) {
                 return nil
             }
             let value = Double(raw) * parameter.factor + parameter.offset
