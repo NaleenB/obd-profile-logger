@@ -148,10 +148,14 @@ sample is written before that event, so the archived `profile.json` describes ev
 one of them; samples are self-describing (`name`, `unit`, `value`, `raw`) either
 way.
 
-`sweep_completed` closes a cycle only after the final identifier's attempt and
-answer have been recorded. `attempted`, `answered` and `missing` therefore
-describe exactly one pass over the profile's identifiers; a timeout on the final
-identifier is not carried into the next cycle.
+`sweep_completed` closes a cycle only after the final identifier's request has
+reached a terminal outcome — a parseable reply or a timeout. An attempt is
+recorded immediately before the `21xx` request, not while its header is being
+configured, so a connection lost before the request leaves that identifier
+unattempted rather than counting a request that was never sent. `attempted`,
+`answered` and `missing` therefore describe exactly one pass over the profile's
+identifiers; neither a timeout nor a dropped connection is carried into the next
+cycle.
 
 `profile_disagreement` means the profile matched by calibration or VIN, but a
 required discriminator (engine speed) did not agree with the ECU's own reading. The
@@ -169,9 +173,14 @@ reconnect window expired), `stalled` (the polling loop was reset) or
 `recording_stopped`. A gap that spans a disconnect is preserved until a genuine
 sample arrives, so the outage is not erased merely because the link returned and
 the first sample is never claimed as proof that data was available while the link
-was down. If a reconnect attempt itself drops before it becomes ready, it is a
-failed attempt to retry, not a second established-link loss; the retry loop is
-replaced only after the old attempt has released the shared transport.
+was down. A link is established only after notification subscription completes,
+not merely when the serial characteristic is found; if a connection attempt drops
+before that, it is a failed attempt to retry, not a second established-link loss.
+The retry loop is replaced only after the old attempt has released the shared
+transport. A superseded attempt checks ownership after every await and stops
+before its fallback scan or connection, so a user disconnect cannot be followed
+by a stale link behind the "Not connected" screen; only the attempt that still
+owns the transport closes it.
 
 While a gap is open the app stops asking the full signal list — every request
 would go unanswered — and instead reads the adapter's own supply voltage (`ATRV`,

@@ -98,6 +98,8 @@ final class LiveModel {
     /// Waits for a cancelled reconnect to relinquish the shared transport before
     /// starting its replacement.
     private var reconnectRestartTask: Task<Void, Never>?
+    /// The attempt currently permitted to act on the shared BLE transport.
+    private var transportLease = ConnectionLease<ConnectionEpoch.Token>()
     private var connectedAt: Date?
     /// Changes whenever a connection attempt or poll session is superseded.
     /// Cancellation is cooperative; this identity is what stops an old request
@@ -111,8 +113,7 @@ final class LiveModel {
 
     private var scanner: DTCScanner?
     private var snapshotGate = DTCSnapshotGate()
-    private var profileIndex = 0
-    private var sweep = SweepAccountant()
+    private var sweep = SweepPass(planned: [])
     private var lastDTCStep = Date.distantPast
 
     /// Roughly 10 s between DTC scans at the current poll cadence.
@@ -173,6 +174,7 @@ final class LiveModel {
             profile = nil
             notice = "Vehicle profile unavailable: \(error)"
         }
+        sweep = SweepPass(planned: profile?.localIdentifiers ?? [])
     }
 
     /// A profile is applied only when the required discriminators agree on three
@@ -374,8 +376,6 @@ final class LiveModel {
         // moment the odometer first becomes readable. Ask on the next cycle
         // rather than waiting out the periodic interval.
         lastOdometerRead = .distantPast
-        profileIndex = 0
-        sweep = SweepAccountant()
         readings.clearManufacturer()
         dpf = nil
         rebuildSignalList()
@@ -648,6 +648,7 @@ final class LiveModel {
         phase = .connecting
         status = "Scanning for adapter…"
         let generation = newConnectionGeneration()
+        transportLease.claim(generation)
 
         pollTask = Task { [weak self] in
             guard let self, self.isCurrent(generation) else { return }
@@ -661,7 +662,7 @@ final class LiveModel {
                 // The adapter that worked last time is connected directly; a
                 // scan is the fallback, not the default.
                 status = "Scanning for adapter…"
-                let link = try await connectAdapter(scanSeconds: 8)
+                let link = try await connectAdapter(scanSeconds: 8, generation: generation)
                 guard self.isCurrent(generation) else { return }
                 let candidate = link.candidate
                 status = "Configuring adapter…"
@@ -789,6 +790,7 @@ final class LiveModel {
         // The scan in progress belongs to the link that just died; resuming it
         // after reconnection would mix two connections into one result.
         scanner = nil
+        transportLease.release()
         transport.shutdown()
         elm = nil
         // Capture this before clearing readings: a gap is not ended by the link
@@ -839,45 +841,80 @@ final class LiveModel {
         let rescanned: Bool
     }
 
+    /// Stops a superseded attempt at the next await boundary.
+    ///
+    /// Cancellation does not interrupt a BLE call that is already in flight, so
+    /// checking only after `connectAdapter()` returns would let a stale attempt
+    /// finish its fallback scan and connect after the user disconnected. If no
+    /// replacement owns the transport, this attempt shuts down whatever it
+    /// opened; if one does, it leaves that connection alone.
+    private func checkpoint(_ generation: ConnectionEpoch.Token) throws {
+        switch transportLease.checkpoint(generation, isCurrent: isCurrent(generation)) {
+        case .proceed:
+            return
+        case .aborted(let shutdownTransport):
+            if shutdownTransport { transport.shutdown() }
+            throw CancellationError()
+        }
+    }
+
     /// Connect to the remembered adapter, and scan if that does not work.
     ///
     /// A saved peripheral can go stale — CoreBluetooth may hold a dead
     /// reference after an adapter reset, or the identifier may change. Both the
     /// first connection and automatic reconnection go through here so recovery
     /// cannot be weaker than the manual path.
-    private func connectAdapter(scanSeconds: TimeInterval) async throws -> AdapterConnection {
+    private func connectAdapter(
+        scanSeconds: TimeInterval,
+        generation: ConnectionEpoch.Token
+    ) async throws -> AdapterConnection {
+        try checkpoint(generation)
         let discoveredAt = Date()
         let remembered = try await transport.findAdapter(scanSeconds: scanSeconds, nameFilter: nil)
+        try checkpoint(generation)
         let discoveryMs = Date().timeIntervalSince(discoveredAt) * 1000
 
         let connectStarted = Date()
+        var connected = false
         do {
             _ = try await transport.connect(remembered)
+            connected = true
+        } catch {
+            // Whether the failure was the adapter or our own teardown is
+            // decided by the checkpoint below, not by the error type.
+            connected = false
+        }
+        // A link that succeeded after cancellation still belongs to nobody.
+        try checkpoint(generation)
+
+        if connected {
             return AdapterConnection(
                 candidate: remembered,
                 discoveryMs: discoveryMs,
                 connectMs: Date().timeIntervalSince(connectStarted) * 1000,
                 rescanned: false
             )
-        } catch {
-            // The failed candidate may still own delegate callbacks or a
-            // half-open GATT connection. Release it before scanning so the
-            // retry cannot inherit that state.
-            transport.disconnect()
-            let rescanStarted = Date()
-            let fresh = try await transport.findAdapter(
-                scanSeconds: scanSeconds, nameFilter: nil, preferKnown: false)
-            let rescanMs = Date().timeIntervalSince(rescanStarted) * 1000
-
-            let retryStarted = Date()
-            _ = try await transport.connect(fresh)
-            return AdapterConnection(
-                candidate: fresh,
-                discoveryMs: discoveryMs + rescanMs,
-                connectMs: Date().timeIntervalSince(retryStarted) * 1000,
-                rescanned: true
-            )
         }
+
+        // The failed candidate may still own delegate callbacks or a
+        // half-open GATT connection. Release it before scanning so the
+        // retry cannot inherit that state.
+        transport.disconnect()
+        let rescanStarted = Date()
+        let fresh = try await transport.findAdapter(
+            scanSeconds: scanSeconds, nameFilter: nil, preferKnown: false)
+        try checkpoint(generation)
+        let rescanMs = Date().timeIntervalSince(rescanStarted) * 1000
+
+        let retryStarted = Date()
+        _ = try await transport.connect(fresh)
+        try checkpoint(generation)
+        return AdapterConnection(
+            candidate: fresh,
+            discoveryMs: discoveryMs + rescanMs,
+            connectMs: Date().timeIntervalSince(retryStarted) * 1000,
+            rescanned: true
+        )
     }
 
     // MARK: - Reconnection
@@ -890,6 +927,7 @@ final class LiveModel {
         status = "Reconnecting…"
         let generation = newConnectionGeneration()
         guard reconnectGate.begin(generation) else { return }
+        transportLease.claim(generation)
 
         reconnectTask = Task { [weak self] in
             guard let self else { return }
@@ -911,7 +949,7 @@ final class LiveModel {
                     // A remembered peripheral that has gone stale must not be
                     // retried for ten minutes while the dongle sits there
                     // advertising under a new identity.
-                    let link = try await self.connectAdapter(scanSeconds: 6)
+                    let link = try await self.connectAdapter(scanSeconds: 6, generation: generation)
                     guard self.isCurrent(generation) else { return }
                     let candidate = link.candidate
 
@@ -986,6 +1024,7 @@ final class LiveModel {
         }
         connectedAt = nil
 
+        transportLease.release()
         transport.shutdown()
         elm = nil
         phase = .idle
@@ -1676,42 +1715,43 @@ final class LiveModel {
     /// without blocking live sampling.
     private func stepProfileScan(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         guard let profile, !profile.localIdentifiers.isEmpty else { return }
-        let planned = profile.localIdentifiers
-        let count = planned.count
-        let lid = planned[profileIndex % count]
-        profileIndex += 1
-        let completesCycle = profileIndex % count == 0
-
-        // Recorded before the request: a timeout is still an attempt.
-        sweep.recordAttempt(lid)
-
-        // Close the cycle only after this request's outcome is recorded. The
-        // old order closed it before the final identifier was even attempted,
-        // which falsely reported that identifier as missing and carried its
-        // result into the next cycle.
-        defer {
-            if completesCycle, let summary = sweep.completeCycle(planned: planned) {
-                session.event(.sweepCompleted, [
-                    "cycle": String(summary.cycle),
-                    "attempted": String(summary.attempted),
-                    "answered": String(summary.answered),
-                    "missing": summary.missing.map { String(format: "%02X", $0) }.joined(separator: ",")
-                ])
-            }
+        // Defensive: a profile change must never let an old plan outlive it.
+        if sweep.planned != profile.localIdentifiers {
+            sweep = SweepPass(planned: profile.localIdentifiers)
         }
+        guard let step = sweep.next() else { return }
+
+        var reachedOutcome = false
+        // A connection lost before the request is sent leaves this identifier
+        // unattempted, and one lost mid-request must not close the cycle with
+        // an outcome that was never observed.
+        defer { if !reachedOutcome { sweep.abandon() } }
 
         guard isCurrent(generation) else { return }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
         guard isCurrent(generation) else { return }
-        let command = String(format: "21%02X", lid)
+
+        let command = String(format: "21%02X", step.lid)
+        // Recorded immediately before the request: from here a timeout is
+        // still an attempt, but configuring the header is not.
+        sweep.requestSent(step.lid)
         let reply = try? await elm.send(command, timeout: 3)
         guard isCurrent(generation) else { return }
-        guard let reply,
-              let hex = reply.payloadHex,
-              let frame = MUT21Frame(hex: hex)
-        else { return }
 
-        sweep.recordAnswer(lid)
+        let hex = reply?.payloadHex
+        let frame = hex.flatMap { MUT21Frame(hex: $0) }
+        reachedOutcome = true
+        if let summary = sweep.finished(step.lid, answered: frame != nil) {
+            session.event(.sweepCompleted, [
+                "cycle": String(summary.cycle),
+                "attempted": String(summary.attempted),
+                "answered": String(summary.answered),
+                "missing": summary.missing.map { String(format: "%02X", $0) }.joined(separator: ",")
+            ])
+        }
+
+        guard let frame, let hex else { return }
+
         let decodedValues = profile.decode(frame)
         let sampleTime = Date()
 

@@ -239,11 +239,19 @@ Each of these has already caused a wrong conclusion.
   drops again while the reconnect task is still running, cancelling its epoch
   without releasing its ownership leaves `beginReconnect` blocked forever. Wait
   for the old attempt to relinquish the shared BLE transport, then start a new
-  attempt under a new ownership token. A disconnect before a connection becomes
-  ready is a failed attempt, not an established-link loss.
-- **A sweep cycle closes after its final answer is recorded.** Completing before
-  recording the last LID reports that LID as missing and carries its attempt into
-  the next cycle, so later counts stop describing a single pass.
+  attempt under a new ownership token. A superseded attempt checks ownership after
+  every await and stops before its fallback scan or connection; only the attempt
+  that still owns the transport closes it. Otherwise a user disconnect can be
+  followed by a stale connection behind the "Not connected" screen.
+- **Readiness means notifications are subscribed.** The serial port is resolved
+  before setup finishes, and a failed or timed-out attempt leaves that port
+  behind. A disconnect before subscription completes is a failed attempt, not an
+  established-link loss, so readiness is tracked explicitly rather than inferred
+  from the port reference.
+- **A sweep cycle closes only after its final request has an outcome.** An attempt
+  is recorded immediately before sending `21xx`, not while configuring the header.
+  Counting before the request reports a LID that was never requested; closing
+  before a reply or timeout carries an unanswered request into the next cycle.
 - **The start odometer is written when it is read, not at close.** Service `0x21`
   does not answer until the car is identified, so it typically arrives after
   recording starts; without it there is no soot-per-km or regen interval. A
