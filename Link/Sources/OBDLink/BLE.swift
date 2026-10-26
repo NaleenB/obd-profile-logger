@@ -423,6 +423,11 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         guard self.peripheral?.identifier == peripheral.identifier else { return }
 
         let message = error?.localizedDescription ?? "link dropped"
+        // A callback while services/notifications are still being set up is a
+        // failed connection attempt, not a lost established link. The reconnect
+        // loop will retry. Reporting it as another link-down used to invalidate
+        // the loop that was already running.
+        let wasReady = port != nil && readyCont == nil
         self.peripheral = nil
         port = nil
         lock.lock()
@@ -435,7 +440,9 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.unlock()
         waiting?.resume(throwing: BLEError.writeFailed("adapter disconnected: \(message)"))
         failReady(BLEError.writeFailed("adapter disconnected: \(message)"))
-        onDisconnect?(message)
+        if wasReady {
+            onDisconnect?(message)
+        }
     }
 
     private func failReady(_ error: Error) {

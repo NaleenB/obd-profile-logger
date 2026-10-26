@@ -148,6 +148,11 @@ sample is written before that event, so the archived `profile.json` describes ev
 one of them; samples are self-describing (`name`, `unit`, `value`, `raw`) either
 way.
 
+`sweep_completed` closes a cycle only after the final identifier's attempt and
+answer have been recorded. `attempted`, `answered` and `missing` therefore
+describe exactly one pass over the profile's identifiers; a timeout on the final
+identifier is not carried into the next cycle.
+
 `profile_disagreement` means the profile matched by calibration or VIN, but a
 required discriminator (engine speed) did not agree with the ECU's own reading. The
 profile is kept — calibration is authoritative — and the evidence is recorded so a
@@ -164,7 +169,9 @@ reconnect window expired), `stalled` (the polling loop was reset) or
 `recording_stopped`. A gap that spans a disconnect is preserved until a genuine
 sample arrives, so the outage is not erased merely because the link returned and
 the first sample is never claimed as proof that data was available while the link
-was down.
+was down. If a reconnect attempt itself drops before it becomes ready, it is a
+failed attempt to retry, not a second established-link loss; the retry loop is
+replaced only after the old attempt has released the shared transport.
 
 While a gap is open the app stops asking the full signal list — every request
 would go unanswered — and instead reads the adapter's own supply voltage (`ATRV`,

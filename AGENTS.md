@@ -235,6 +235,15 @@ Each of these has already caused a wrong conclusion.
 - **A scan and a connection are one unit.** The scanner is dropped on a link
   loss or a stall, and a cancelled poll task does not commit a step it was
   waiting on. Keeping either would stitch two connections into one DTC result.
+- **A reconnect attempt must be replaced, not just invalidated.** If the link
+  drops again while the reconnect task is still running, cancelling its epoch
+  without releasing its ownership leaves `beginReconnect` blocked forever. Wait
+  for the old attempt to relinquish the shared BLE transport, then start a new
+  attempt under a new ownership token. A disconnect before a connection becomes
+  ready is a failed attempt, not an established-link loss.
+- **A sweep cycle closes after its final answer is recorded.** Completing before
+  recording the last LID reports that LID as missing and carries its attempt into
+  the next cycle, so later counts stop describing a single pass.
 - **The start odometer is written when it is read, not at close.** Service `0x21`
   does not answer until the car is identified, so it typically arrives after
   recording starts; without it there is no soot-per-km or regen interval. A

@@ -94,6 +94,10 @@ final class LiveModel {
     private var regenSootAtStart: Double?
     private var stallWatchdog: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var reconnectGate = SingleAttemptGate<ConnectionEpoch.Token>()
+    /// Waits for a cancelled reconnect to relinquish the shared transport before
+    /// starting its replacement.
+    private var reconnectRestartTask: Task<Void, Never>?
     private var connectedAt: Date?
     /// Changes whenever a connection attempt or poll session is superseded.
     /// Cancellation is cooperative; this identity is what stops an old request
@@ -658,7 +662,7 @@ final class LiveModel {
                 // scan is the fallback, not the default.
                 status = "Scanning for adapter…"
                 let link = try await connectAdapter(scanSeconds: 8)
-                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
+                guard self.isCurrent(generation) else { return }
                 let candidate = link.candidate
                 status = "Configuring adapter…"
                 KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
@@ -687,7 +691,7 @@ final class LiveModel {
                 let elmMs = Date().timeIntervalSince(elmBegan) * 1000
 
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
-                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
+                guard self.isCurrent(generation) else { return }
                 identity = VehicleIdentity()
                 identityResolved = false
                 identificationAttempts = 0
@@ -699,7 +703,7 @@ final class LiveModel {
 
                 let discoveryStarted = Date()
                 await discoverCapabilities(using: client)
-                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
+                guard self.isCurrent(generation) else { return }
                 let capabilityDiscoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
                 rebuildSignalList()
 
@@ -732,7 +736,7 @@ final class LiveModel {
                 // anything.
                 let startOdometer = await readOdometer(using: client)
                 let ambient = await readAmbient(using: client)
-                guard self.isCurrent(generation) else { self.transport.shutdown(); return }
+                guard self.isCurrent(generation) else { return }
                 odometerKm = startOdometer
                 ambientTempC = ambient
                 odometerStartKm = startOdometer
@@ -772,6 +776,14 @@ final class LiveModel {
         invalidateConnection()
         stallWatchdog?.cancel()
         stallWatchdog = nil
+        // If this callback belongs to a link attempt made by the reconnect task,
+        // that task has just been invalidated. Its operations still share the
+        // BLE transport, so wait for it to finish before replacing it rather
+        // than letting two attempts reset the same transport concurrently.
+        let interruptedReconnect = reconnectTask
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectGate.interrupt()
         pollTask?.cancel()
         pollTask = nil
         // The scan in progress belongs to the link that just died; resuming it
@@ -795,7 +807,21 @@ final class LiveModel {
         // The link dropping is usually distance, not a decision. Keep the
         // session open and try to pick it back up.
         if isRecording {
-            beginReconnect()
+            if let interruptedReconnect {
+                reconnectRestartTask?.cancel()
+                reconnectRestartTask = Task { [weak self] in
+                    _ = await interruptedReconnect.value
+                    guard let self, !Task.isCancelled,
+                          self.isRecording, !self.intentionalDisconnect
+                    else { return }
+                    self.reconnectRestartTask = nil
+                    if self.reconnectTask == nil {
+                        self.beginReconnect()
+                    }
+                }
+            } else if reconnectRestartTask == nil {
+                beginReconnect()
+            }
         } else {
             phase = .failed("Adapter disconnected: \(reason)")
             status = "Adapter disconnected"
@@ -863,9 +889,12 @@ final class LiveModel {
         phase = .reconnecting
         status = "Reconnecting…"
         let generation = newConnectionGeneration()
+        guard reconnectGate.begin(generation) else { return }
 
         reconnectTask = Task { [weak self] in
-            guard let self, self.isCurrent(generation) else { return }
+            guard let self else { return }
+            defer { self.finishReconnectTask(generation) }
+            guard self.isCurrent(generation) else { return }
             let deadline = Date().addingTimeInterval(600)
             var attempt = 0
             var delay: UInt64 = 2_000_000_000
@@ -883,10 +912,7 @@ final class LiveModel {
                     // retried for ten minutes while the dongle sits there
                     // advertising under a new identity.
                     let link = try await self.connectAdapter(scanSeconds: 6)
-                    guard self.isCurrent(generation) else {
-                        self.transport.shutdown()
-                        return
-                    }
+                    guard self.isCurrent(generation) else { return }
                     let candidate = link.candidate
 
                     let client = ELMClient(transport: self.transport, logger: nil)
@@ -896,10 +922,7 @@ final class LiveModel {
                     if let protocolValue = self.profile?.elmProtocol {
                         _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
                     }
-                    guard self.isCurrent(generation) else {
-                        self.transport.shutdown()
-                        return
-                    }
+                    guard self.isCurrent(generation) else { return }
 
                     self.elm = client
                     KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
@@ -913,9 +936,9 @@ final class LiveModel {
                         "adapterRescanned": link.rescanned ? "true" : "false"
                     ])
                     self.startPolling(generation: generation)
-                    self.reconnectTask = nil
                     return
                 } catch {
+                    guard self.isCurrent(generation) else { return }
                     self.transport.shutdown()
                     try? await Task.sleep(nanoseconds: delay)
                     delay = min(delay * 2, 10_000_000_000)
@@ -927,13 +950,20 @@ final class LiveModel {
             self.stopRecording(reason: "reconnect_timeout")
             self.phase = .failed("Adapter disconnected")
             self.status = "Adapter disconnected"
-            self.reconnectTask = nil
         }
+    }
+
+    private func finishReconnectTask(_ generation: ConnectionEpoch.Token) {
+        guard reconnectGate.finish(generation) else { return }
+        reconnectTask = nil
     }
 
     private func cancelReconnect() {
         reconnectTask?.cancel()
         reconnectTask = nil
+        reconnectGate.interrupt()
+        reconnectRestartTask?.cancel()
+        reconnectRestartTask = nil
     }
 
     enum DisconnectReason: String {
@@ -1646,14 +1676,21 @@ final class LiveModel {
     /// without blocking live sampling.
     private func stepProfileScan(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         guard let profile, !profile.localIdentifiers.isEmpty else { return }
-        let count = profile.localIdentifiers.count
-        let lid = profile.localIdentifiers[profileIndex % count]
+        let planned = profile.localIdentifiers
+        let count = planned.count
+        let lid = planned[profileIndex % count]
         profileIndex += 1
+        let completesCycle = profileIndex % count == 0
 
-        // The cycle closes as the index wraps, which is after every identifier
-        // has been requested once.
-        if profileIndex % count == 0 {
-            if let summary = sweep.completeCycle(planned: profile.localIdentifiers) {
+        // Recorded before the request: a timeout is still an attempt.
+        sweep.recordAttempt(lid)
+
+        // Close the cycle only after this request's outcome is recorded. The
+        // old order closed it before the final identifier was even attempted,
+        // which falsely reported that identifier as missing and carried its
+        // result into the next cycle.
+        defer {
+            if completesCycle, let summary = sweep.completeCycle(planned: planned) {
                 session.event(.sweepCompleted, [
                     "cycle": String(summary.cycle),
                     "attempted": String(summary.attempted),
@@ -1662,9 +1699,6 @@ final class LiveModel {
                 ])
             }
         }
-
-        // Recorded before the request: a timeout is still an attempt.
-        sweep.recordAttempt(lid)
 
         guard isCurrent(generation) else { return }
         _ = try? await elm.send("ATSH7E0", timeout: 2)
