@@ -62,6 +62,10 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     private var peripheral: CBPeripheral?
     private var port: SerialPort?
+    /// `port` is set before notification subscription completes, so it cannot
+    /// answer whether this connection is usable. Only a completed subscription
+    /// establishes the link.
+    private var readiness = LinkReadiness()
     private var rxBuffer = Data()
 
     private var pending: CheckedContinuation<String, Error>?
@@ -139,6 +143,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         let oldPeripheral = peripheral
         peripheral = nil
         port = nil
+        readiness.reset()
         if let oldPeripheral, oldPeripheral.state != .disconnected {
             central?.cancelPeripheralConnection(oldPeripheral)
         }
@@ -318,6 +323,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         let oldPeripheral = peripheral
         peripheral = nil
         port = nil
+        readiness.reset()
         if let oldPeripheral {
             central?.cancelPeripheralConnection(oldPeripheral)
         }
@@ -423,6 +429,14 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         guard self.peripheral?.identifier == peripheral.identifier else { return }
 
         let message = error?.localizedDescription ?? "link dropped"
+        // A callback while services/notifications are still being set up is a
+        // failed connection attempt, not a lost established link. The reconnect
+        // loop will retry. Reporting it as another link-down used to invalidate
+        // the loop that was already running. Readiness is explicit because a
+        // failed setup leaves `port` behind after `failReady` clears the
+        // continuation.
+        let wasReady = readiness.isEstablished
+        readiness.reset()
         self.peripheral = nil
         port = nil
         lock.lock()
@@ -435,10 +449,13 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         lock.unlock()
         waiting?.resume(throwing: BLEError.writeFailed("adapter disconnected: \(message)"))
         failReady(BLEError.writeFailed("adapter disconnected: \(message)"))
-        onDisconnect?(message)
+        if wasReady {
+            onDisconnect?(message)
+        }
     }
 
     private func failReady(_ error: Error) {
+        readiness.reset()
         lock.lock()
         let cont = readyCont
         readyCont = nil
@@ -540,6 +557,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         }
 
         port = selected
+        readiness.resolvePort()
         peripheral.setNotifyValue(true, for: selected.notify)
     }
 
@@ -561,6 +579,9 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         connectTimeout?.cancel()
         connectTimeout = nil
         lock.unlock()
+        // A nil continuation here means setup was already failed or superseded;
+        // this callback must not promote that connection to ready.
+        if cont != nil { readiness.markEstablished() }
         cont?.resume(returning: port)
     }
 
