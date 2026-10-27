@@ -184,6 +184,9 @@ final class LiveModel {
     /// An in-session reconnect deliberately does not call this: it is still the
     /// same car and must keep the profile and its odometer context.
     func resetForNewSession() {
+        // Clear the previous session's notice before the profile load can set a
+        // real one (an unavailable bundled profile).
+        notice = nil
         if let overrideProfileID {
             loadProfile(id: overrideProfileID)
             profileMatchMethod = ProfileResolver.Method.override.rawValue
@@ -210,6 +213,8 @@ final class LiveModel {
         odometerStartKm = nil
         ambientTempC = nil
         lastOdometerRead = .distantPast
+        lastDTCStep = .distantPast
+        manufacturerProbeTimings = [:]
 
         supportedPIDs = []
         discoveryResult = PIDDiscovery()
@@ -1347,8 +1352,8 @@ final class LiveModel {
     /// `ATDPN` as reported by the adapter, used to choose a valid module header.
     private var detectedProtocolNumber: String?
 
-    private var isCANProtocol: Bool {
-        OBDProtocol.isCAN(detectedProtocolNumber ?? profile?.transport?.elmProtocol)
+    private var protocolIdentifier: String? {
+        detectedProtocolNumber ?? profile?.transport?.elmProtocol
     }
 
     /// Standard OBD is normally read by broadcast, but this car has both an ECM
@@ -1359,16 +1364,19 @@ final class LiveModel {
     ///
     /// A non-CAN bus must keep broadcast: `7E0` is a CAN header, and sending it
     /// to an ISO 9141 or KWP vehicle loses the request rather than selecting an
-    /// engine module.
+    /// engine module. The same applies to 29-bit CAN, where the profile's
+    /// `7E0` is an 11-bit address; `OBDProtocol.engineHeader` makes that choice
+    /// for both standard and manufacturer traffic.
     private var standardHeader: String {
-        if profileID == ProfileCatalog.genericID, !isCANProtocol { return "7DF" }
-        return profile?.standardRequestHeader ?? (isCANProtocol ? "7E0" : "7DF")
+        OBDProtocol.engineHeader(
+            profileHeader: profile?.engineRequestHeader,
+            protocolIdentifier: protocolIdentifier)
     }
 
-    private var manufacturerHeader: String {
-        if profileID == ProfileCatalog.genericID, !isCANProtocol { return "7DF" }
-        return profile?.manufacturerRequestHeader ?? (isCANProtocol ? "7E0" : "7DF")
-    }
+    /// Manufacturer service `0x21` is read from the engine module too. A
+    /// profile that names a different ECM header is trusted by the shared
+    /// helper; a profile with no ECM keeps the same protocol-aware fallback.
+    private var manufacturerHeader: String { standardHeader }
 
     private func selectEngineHeader(using elm: ELMClient) async {
         _ = try? await elm.send("ATSH\(standardHeader)", timeout: 2)

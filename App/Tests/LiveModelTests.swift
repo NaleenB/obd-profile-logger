@@ -57,4 +57,15 @@ final class LiveModelTests: XCTestCase {
         XCTAssertEqual(model.profileID, "mitsubishi-outlander-2016-4n14")
         XCTAssertEqual(model.profileMatchMethod, ProfileResolver.Method.override.rawValue)
     }
+
+    /// A notice from the previous session ("saved with problems") must not
+    /// describe the new connection while it is still starting.
+    func testNewSessionClearsThePreviousNotice() {
+        let model = LiveModel()
+        model.notice = "Session saved with problems: test"
+
+        model.resetForNewSession()
+
+        XCTAssertNil(model.notice)
+    }
 }
