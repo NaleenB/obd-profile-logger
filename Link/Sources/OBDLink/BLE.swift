@@ -7,6 +7,7 @@ public enum BLEError: Error, CustomStringConvertible {
     case notConnected
     case noSerialPort
     case timeout(String)
+    case teardownTimedOut
     case writeFailed(String)
 
     public var description: String {
@@ -16,6 +17,7 @@ public enum BLEError: Error, CustomStringConvertible {
         case .notConnected: return "Adapter is not connected"
         case .noSerialPort: return "Adapter exposes no usable serial characteristic"
         case .timeout(let c): return "Timed out waiting for a response to '\(c)'"
+        case .teardownTimedOut: return "The previous adapter connection did not close in time"
         case .writeFailed(let s): return "Write failed: \(s)"
         }
     }
@@ -79,6 +81,11 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     private var scanCont: CheckedContinuation<[Candidate], Error>?
     private var scanTimeoutItem: DispatchWorkItem?
     private var readyCont: CheckedContinuation<SerialPort, Error>?
+
+    /// A UUID is not a connection identity. This tracks teardown that has been
+    /// requested but not yet observed, so a replacement for the same adapter
+    /// cannot receive the old callback.
+    private let teardown = ConnectionTeardownCoordinator()
 
     private var candidates: [Candidate] = []
     private var servicesRemaining = 0
@@ -145,6 +152,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         port = nil
         readiness.reset()
         if let oldPeripheral, oldPeripheral.state != .disconnected {
+            beginTeardown(oldPeripheral)
             central?.cancelPeripheralConnection(oldPeripheral)
         }
 
@@ -324,7 +332,8 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         peripheral = nil
         port = nil
         readiness.reset()
-        if let oldPeripheral {
+        if let oldPeripheral, oldPeripheral.state != .disconnected {
+            beginTeardown(oldPeripheral)
             central?.cancelPeripheralConnection(oldPeripheral)
         }
 
@@ -383,10 +392,15 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         // continuation, delegate callbacks or partially discovered services.
         disconnect()
 
-        adapterName = candidate.name
-        adapterIdentifier = candidate.peripheral.identifier.uuidString
-
         let peripheral = candidate.peripheral
+        // The same adapter reuses the same CBPeripheral and UUID. Wait for the
+        // previous connection's teardown callback before installing a
+        // replacement, otherwise that callback can clear the new attempt.
+        try await waitForTeardown(of: peripheral)
+
+        adapterName = candidate.name
+        adapterIdentifier = peripheral.identifier.uuidString
+
         self.peripheral = peripheral
         peripheral.delegate = self
 
@@ -406,7 +420,13 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard self.peripheral?.identifier == peripheral.identifier else { return }
+        guard self.peripheral?.identifier == peripheral.identifier else {
+            // This connection belongs to no current attempt (for example, a
+            // connect that completed after its teardown was requested). Close
+            // it rather than leaving an invisible link open.
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
         peripheral.discoverServices(nil)
     }
 
@@ -415,6 +435,11 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
+        // Release a waiter even if CoreBluetooth reports the state a moment
+        // before it settles. A late failure for the previous attempt must still
+        // not replace the state of a newer one.
+        completeTeardown(peripheral.identifier)
+        guard peripheral.state == .disconnected else { return }
         guard self.peripheral?.identifier == peripheral.identifier else { return }
         failReady(BLEError.unavailable("could not connect: \(error?.localizedDescription ?? "unknown")"))
     }
@@ -424,8 +449,13 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
+        // Complete a teardown barrier before the ownership check: an old link
+        // may be the only reason a replacement for the same UUID is waiting.
+        completeTeardown(peripheral.identifier)
+
         // An old candidate can disconnect after a newer one is connected. Its
         // callback must not fail the new connection or request.
+        guard peripheral.state == .disconnected else { return }
         guard self.peripheral?.identifier == peripheral.identifier else { return }
 
         let message = error?.localizedDescription ?? "link dropped"
@@ -452,6 +482,21 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         if wasReady {
             onDisconnect?(message)
         }
+    }
+
+    private func beginTeardown(_ peripheral: CBPeripheral) {
+        guard peripheral.state != .disconnected else { return }
+        teardown.begin(peripheral.identifier)
+    }
+
+    /// A timeout is an error rather than permission to continue: a replacement
+    /// must not race a callback that CoreBluetooth has not delivered yet.
+    private func waitForTeardown(of peripheral: CBPeripheral) async throws {
+        try await teardown.wait(for: peripheral.identifier, timeout: 5)
+    }
+
+    private func completeTeardown(_ identifier: UUID) {
+        teardown.finish(identifier)
     }
 
     private func failReady(_ error: Error) {
