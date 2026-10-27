@@ -9,8 +9,9 @@ public struct PIDDiscovery: Equatable {
 
     /// Bitmaps, by their own PID, that answered.
     public private(set) var answeredBases: Set<UInt8> = []
-    /// Every PID those bitmaps advertised.
-    public private(set) var supportedPIDs: Set<UInt8> = []
+    /// Each answered bitmap, kept separately so an orphan reply cannot add PIDs
+    /// outside the chain its predecessors declared.
+    private var bitmaps: [UInt8: Set<UInt8>] = [:]
 
     public init() {}
 
@@ -23,7 +24,7 @@ public struct PIDDiscovery: Equatable {
 
     public mutating func record(base: UInt8, pids: Set<UInt8>) {
         answeredBases.insert(base)
-        supportedPIDs.formUnion(pids)
+        bitmaps[base] = pids
     }
 
     /// True when the first bitmap answered. Without it nothing is known about
@@ -32,25 +33,46 @@ public struct PIDDiscovery: Equatable {
 
     /// The highest bitmap whose range is known, treating a gap as the end of
     /// what can be judged.
+    ///
+    /// The chain has to be coherent as well as contiguous: a bitmap only counts
+    /// when the previous one advertised it. Two modules answer a broadcast
+    /// request on this car, and a late reply from the transmission must not
+    /// lend authority to an engine range its own bitmap never declared.
     public var lastContiguousBase: UInt8? {
         guard isRooted else { return nil }
         var base: UInt8 = 0x00
-        while base < 0xE0, answeredBases.contains(base &+ 0x20) {
+        while base < 0xE0,
+              bitmaps[base]?.contains(base &+ 0x20) == true,
+              bitmaps[base &+ 0x20] != nil {
             base = base &+ 0x20
         }
         return base
+    }
+
+    /// Every PID advertised by the contiguous chain.
+    ///
+    /// An answer outside the chain is retained in `answeredBases` so a retry
+    /// does not ask for it again, but its PIDs are not treated as supported.
+    public var supportedPIDs: Set<UInt8> {
+        guard isRooted, let last = lastContiguousBase else { return [] }
+        var supported: Set<UInt8> = []
+        var base: UInt8 = 0x00
+        while true {
+            supported.formUnion(bitmaps[base] ?? [])
+            guard base < last else { break }
+            base = base &+ 0x20
+        }
+        return supported
     }
 
     /// The bitmap the ECU declared but never answered. At most one, because
     /// probing stops at the first gap: without `0x20` there is no way to learn
     /// whether `0x40` exists.
     public var unansweredBases: Set<UInt8> {
-        guard let last = lastContiguousBase else { return [] }
-        let next = last &+ 0x20
-        guard next <= (PIDCapabilities.probePIDs.last ?? 0x60),
-              supportedPIDs.contains(next)
+        guard let last = lastContiguousBase, last < 0xE0,
+              bitmaps[last]?.contains(last &+ 0x20) == true
         else { return [] }
-        return [next]
+        return [last &+ 0x20]
     }
 
     /// True when the last answered bitmap declared no successor, so nothing
@@ -60,6 +82,21 @@ public struct PIDDiscovery: Equatable {
     /// True while asking again could change the answer — the root is missing,
     /// or a declared bitmap never replied.
     public var needsRetry: Bool { !chainEnded }
+
+    /// The next bitmap the probe should request, or nil when this pass is done.
+    ///
+    /// The decision belongs here rather than in the app: probing above a missing
+    /// root learns nothing, and probing above an undeclared successor asks a
+    /// compliant ECU for a range it has already said does not exist.
+    public func nextProbe(_ bases: [UInt8] = PIDCapabilities.probePIDs) -> UInt8? {
+        for base in bases {
+            if answeredBases.contains(base) { continue }
+            if base != 0x00, !isRooted { return nil }
+            if isRooted, !supportedPIDs.contains(base) { return nil }
+            return base
+        }
+        return nil
+    }
 
     /// Whether `pid`'s range is judged by this pass at all.
     public func isKnown(_ pid: UInt8) -> Bool {

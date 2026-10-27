@@ -26,6 +26,33 @@ public struct VehicleProfile: Codable, Equatable {
         public let modules: [Module]
     }
 
+    /// The engine module's request header, when the profile identifies one.
+    ///
+    /// Standard OBD is normally read by broadcast, but a vehicle can have more
+    /// than one module answering `7DF`. Addressing the engine explicitly keeps
+    /// the transmission's speed or capability bitmap out of the engine values.
+    public var engineRequestHeader: String? {
+        if let ecm = transport?.modules.first(where: {
+            $0.name.caseInsensitiveCompare("ECM") == .orderedSame
+        }) {
+            return ecm.requestHeader
+        }
+        // CAN 11/500 uses the standard engine address even when a profile has
+        // not enumerated its modules.
+        if transport?.elmProtocol == "6" { return "7E0" }
+        return nil
+    }
+
+    /// Header to use for standard mode-`01` traffic. Broadcast is the fallback
+    /// for protocols where the engine address is not known.
+    public var standardRequestHeader: String { engineRequestHeader ?? "7DF" }
+
+    /// Header to use for manufacturer reads. Mitsubishi service `0x21` is
+    /// addressed to the engine module; profiles for other buses can override it
+    /// by naming an ECM module. With no engine address, broadcast is safer than
+    /// inventing a CAN engine header on an unknown protocol.
+    public var manufacturerRequestHeader: String { engineRequestHeader ?? "7DF" }
+
     /// One standard OBD-II signal, described as data rather than decoded in code:
     /// `value = raw * factor + offset`, read big-endian over `bytes` bytes.
     public struct StandardSignal: Codable, Equatable, Identifiable, Sendable {

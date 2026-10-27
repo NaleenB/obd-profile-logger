@@ -135,6 +135,15 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertNotNil(decoded.first { $0.itemNumber == 376 })
     }
 
+    /// Standard and manufacturer reads must address the engine module rather
+    /// than taking whichever broadcast frame arrived first.
+    func testShippedProfileAddressesTheEngineModule() throws {
+        let profile = try shippedProfile()
+        XCTAssertEqual(profile.engineRequestHeader, "7E0")
+        XCTAssertEqual(profile.standardRequestHeader, "7E0")
+        XCTAssertEqual(profile.manufacturerRequestHeader, "7E0")
+    }
+
     func testUnknownLIDDecodesToNothing() throws {
         let profile = try shippedProfile()
         let frame = try XCTUnwrap(MUT21Frame(hex: "61FF00"))
@@ -311,6 +320,8 @@ final class GenericProfileTests: XCTestCase {
         XCTAssertTrue(generic.blocks.isEmpty, "a generic profile has no manufacturer data")
         XCTAssertNil(generic.service.readByLocalIdentifier)
         XCTAssertGreaterThanOrEqual(generic.signals.count, 10)
+        XCTAssertEqual(generic.engineRequestHeader, "7E0")
+        XCTAssertEqual(generic.standardRequestHeader, "7E0")
     }
 
     func testGenericProfileDecodesLikeAnyOther() throws {

@@ -58,6 +58,55 @@ final class PIDDiscoveryTests: XCTestCase {
         XCTAssertFalse(discovery.shouldPoll(0x02), "0x02 was not advertised by the answered bitmap")
     }
 
+    /// A higher bitmap is not evidence unless the chain reaches it. A late
+    /// transmission reply must not add PIDs the engine bitmap never declared.
+    func testOrphanHigherBitmapCannotExtendTheChain() {
+        var discovery = PIDDiscovery()
+        discovery.record(base: 0x00, pids: [0x05, 0x0C, 0x0D])
+        discovery.record(base: 0x20, pids: [0x21, 0x30])
+
+        XCTAssertTrue(discovery.isRooted)
+        XCTAssertEqual(discovery.lastContiguousBase, 0x00)
+        XCTAssertTrue(discovery.unansweredBases.isEmpty)
+        XCTAssertTrue(discovery.chainEnded)
+        XCTAssertEqual(discovery.supportedPIDs, [0x05, 0x0C, 0x0D])
+        XCTAssertFalse(discovery.shouldPoll(0x21),
+                       "0x00 never declared the 0x20 range")
+    }
+
+    /// A car whose 0x60 bitmap declares 0x80 must leave that range unknown.
+    /// Treating the end of the old probe list as the end of the car silently
+    /// dropped every supported PID above 0x60.
+    func testDeclaredSuccessorAboveSixtyIsUnknownUntilItAnswers() {
+        var discovery = PIDDiscovery()
+        discovery.record(base: 0x00, pids: [0x20])
+        discovery.record(base: 0x20, pids: [0x40])
+        discovery.record(base: 0x40, pids: [0x60])
+        discovery.record(base: 0x60, pids: [0x61, 0x80])
+
+        XCTAssertEqual(discovery.lastContiguousBase, 0x60)
+        XCTAssertEqual(discovery.unansweredBases, [0x80])
+        XCTAssertFalse(discovery.chainEnded)
+        XCTAssertTrue(discovery.shouldPoll(0x81),
+                      "an unanswered 0x80 bitmap cannot prove 0x81 is unsupported")
+    }
+
+    /// Once 0x80 answers and declares no successor, the chain really has ended
+    /// and PIDs above it may be dropped.
+    func testChainCanEndAboveSixty() {
+        var discovery = PIDDiscovery()
+        discovery.record(base: 0x00, pids: [0x20])
+        discovery.record(base: 0x20, pids: [0x40])
+        discovery.record(base: 0x40, pids: [0x60])
+        discovery.record(base: 0x60, pids: [0x80])
+        discovery.record(base: 0x80, pids: [0x81])
+
+        XCTAssertEqual(discovery.lastContiguousBase, 0x80)
+        XCTAssertTrue(discovery.chainEnded)
+        XCTAssertTrue(discovery.shouldPoll(0x81))
+        XCTAssertFalse(discovery.shouldPoll(0xC1))
+    }
+
     /// Every declared bitmap answered. The set is authoritative, so a PID the
     /// car does not advertise is dropped even inside a covered range.
     func testCompletePassIsAuthoritative() throws {
@@ -92,6 +141,34 @@ final class PIDDiscoveryTests: XCTestCase {
         XCTAssertTrue(discovery.chainEnded)
         XCTAssertFalse(discovery.shouldPoll(0x42))
         XCTAssertTrue(discovery.shouldPoll(0x21))
+    }
+
+    /// The probe order is part of the discovery contract, not app policy.
+    func testNextProbeStopsAtARootFailure() {
+        var discovery = PIDDiscovery()
+        XCTAssertEqual(discovery.nextProbe(), 0x00)
+
+        // A higher reply without the root must not unlock the rest of the
+        // probe list or make the pass look authoritative.
+        discovery.record(base: 0x40, pids: [0x42])
+        XCTAssertEqual(discovery.nextProbe(), 0x00)
+    }
+
+    func testNextProbeFollowsOnlyDeclaredRanges() {
+        var discovery = PIDDiscovery()
+        discovery.record(base: 0x00, pids: [0x05, 0x0C, 0x20])
+        XCTAssertEqual(discovery.nextProbe(), 0x20)
+
+        discovery.record(base: 0x20, pids: [0x21, 0x30])
+        XCTAssertNil(discovery.nextProbe(),
+                     "0x20 did not declare 0x40, so probing it would be invented")
+    }
+
+    func testNextProbeSkipsAnsweredBases() {
+        var discovery = PIDDiscovery()
+        discovery.record(base: 0x00, pids: [0x20])
+        discovery.record(base: 0x20, pids: [0x21, 0x40])
+        XCTAssertEqual(discovery.nextProbe(), 0x40)
     }
 
     func testBaseMapping() {
