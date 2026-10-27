@@ -267,6 +267,17 @@ Each of these has already caused a wrong conclusion.
   duplicate LIDs, invalid identity references and `observed` evidence that does
   not match the emitted scaling. A profile that cannot be interpreted safely is
   not allowed to become trusted data.
+- **A PID bitmap is authoritative only for its own range.** On 27 Oct 2026 the
+  ECU woke part-way through the connect probe: `0100` and `0120` went
+  unanswered, `0140` parsed, and the session recorded a confident 7-PID car and
+  one dashboard tile instead of 28 PIDs and ten. A range whose bitmap never
+  answered is unknown, not unsupported — `PIDDiscovery` filters only what the
+  answering bitmaps cover, retries the gap once the ECU is answering, and
+  records `unansweredPIDBases` so a partial set cannot be read as the whole car.
+  The same session shows the other half of the trap: one connect-time probe is
+  not evidence about a service. `2111` timed out while the ECU woke, and the
+  manifest claimed `0x21` never answered while 2136 manufacturer samples sat
+  below it.
 
 ## Status — what is proven
 

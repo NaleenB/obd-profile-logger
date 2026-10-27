@@ -44,6 +44,7 @@ changes, and rewritten at stop with `finishedAt` and counts.
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
 | `supportedPIDs` | full capability set discovered during the session; null when discovery never succeeded |
 | `capabilityDiscovery` | `succeeded` or `failed` — written at stop, so a cold start that resolved once the ECU woke records `succeeded` |
+| `unansweredPIDBases` | bitmaps (e.g. `["20"]`) the ECU declared but never answered, present only when discovery was incomplete. `supportedPIDs` then covers only the part of the car the answering bitmaps reached, and the unanswered range was polled without being checked |
 | `profileMatch` | `calibration`, `vin`, `agreement`, `none`, or `override` (development only) — written at stop |
 | `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |

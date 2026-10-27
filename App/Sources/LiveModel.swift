@@ -605,6 +605,9 @@ final class LiveModel {
     /// PIDs the ECU advertised, and whether asking worked at all.
     private(set) var supportedPIDs: Set<UInt8> = []
     private(set) var discovery: DiscoveryState = .notRun
+    /// Which bitmaps actually answered. `supportedPIDs` alone cannot say
+    /// whether a missing PID was withheld by the car or never asked about.
+    private var discoveryResult = PIDDiscovery()
     private var discoveryRetryDone = false
     /// Discovery state when the manifest was first written. A cold start can
     /// fail here and succeed later, so the stop path records the final result.
@@ -1056,6 +1059,9 @@ final class LiveModel {
                 ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
                 : nil,
             capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            unansweredPIDBases: discoveryResult.unansweredBases.isEmpty
+                ? nil
+                : discoveryResult.unansweredBases.sorted().map { String(format: "%02X", $0) },
             profileMatch: profileMatchMethod,
             profileHash: profileHash,
             timezoneOffsetSeconds: TimeZone.current.secondsFromGMT(),
@@ -1107,10 +1113,16 @@ final class LiveModel {
             capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
             supportedPIDs: discovery == .succeeded
                 ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
-                : nil
+                : nil,
+            unansweredPIDBases: discoveryResult.unansweredBases.isEmpty
+                ? nil
+                : discoveryResult.unansweredBases.sorted().map { String(format: "%02X", $0) }
         )
         if discoveryAtRecordingStart != .succeeded, discovery == .succeeded {
             session.appendNote("Capability discovery did not answer at session start and succeeded once the ECU was awake.")
+        }
+        if !discoveryResult.unansweredBases.isEmpty {
+            session.appendNote("Capability discovery left a PID bitmap unanswered, so its range was polled without being checked against the ECU.")
         }
         session.updateProfile(
             id: profileID,
@@ -1203,7 +1215,12 @@ final class LiveModel {
 
         // A new start inside one connection is a new cycle. The monitor latches
         // "running", so without this the next crank would never be measured.
-        if battery.currentPhase == .running, (lastRPM ?? 0) < 400 {
+        // A stop needs a current rpm to be believed. This car's charging floats
+        // between 12.6 and 14.5 V by design, so a voltage dip is not a stop —
+        // and treating a missing rpm as zero reported a stop after every
+        // sample, resetting the monitor and re-emitting a report every few
+        // seconds.
+        if battery.currentPhase == .running, let rpm = lastRPM, rpm < 400 {
             if engineStoppedSince == nil { engineStoppedSince = Date() }
             if let since = engineStoppedSince,
                Date().timeIntervalSince(since) > 5,
@@ -1271,23 +1288,37 @@ final class LiveModel {
         return true
     }
 
-    /// Asks which PIDs the vehicle supports. Purely additive: if every probe
-    /// fails, `supportedPIDs` stays empty and nothing is filtered.
-    private func discoverCapabilities(using elm: ELMClient) async {
-        var found: Set<UInt8> = []
+    /// Asks which PIDs the vehicle supports.
+    ///
+    /// Each bitmap is trusted only for its own range, so a pass that stops at a
+    /// gap leaves the higher ranges unknown rather than unsupported. Retrying
+    /// carries the earlier answers in, so a second pass costs one request.
+    private func discoverCapabilities(
+        using elm: ELMClient,
+        into previous: PIDDiscovery = PIDDiscovery()
+    ) async {
+        var result = previous
         for base in PIDCapabilities.probePIDs {
+            if result.answeredBases.contains(base) { continue }
+            // Nothing above a bitmap the ECU never declared exists.
+            if result.isRooted, !result.supportedPIDs.contains(base) { break }
+
             let command = String(format: "01%02X", base)
             guard let reply = try? await elm.send(command, timeout: 2),
                   let hex = reply.payloadHex,
-                  let supported = PIDCapabilities.supported(fromHex: hex, base: base)
+                  let supported = PIDCapabilities.supported(fromHex: hex, base: base),
+                  !supported.isEmpty
             else { continue }
-            found.formUnion(supported)
-            if supported.isEmpty { break }
+            // An all-zero bitmap would say "this car supports nothing", which no
+            // compliant vehicle does; padding or a truncated read is likelier,
+            // so it is treated as no answer rather than as an empty car.
+            result.record(base: base, pids: supported)
         }
-        supportedPIDs = found
-        // A valid bitmap always advertises at least one PID, so an empty result
-        // means every probe failed rather than "this car supports nothing".
-        discovery = found.isEmpty ? .failed : .succeeded
+        discoveryResult = result
+        supportedPIDs = result.supportedPIDs
+        // A pass that answered only a higher bitmap learned nothing usable:
+        // without the first one there is no way to tell which PIDs exist.
+        discovery = result.isRooted ? .succeeded : .failed
     }
 
     /// Profile signals if it has any, otherwise the generic baseline — then
@@ -1302,12 +1333,15 @@ final class LiveModel {
             return
         }
 
-        // Discovery succeeded: trust it. A PID the ECU does not advertise is
-        // dropped, even if that leaves the dashboard empty — showing tiles that
-        // can never populate is worse than an honest empty state.
+        // Discovery succeeded: trust it, but only for the ranges it reached. A
+        // PID the ECU does not advertise is dropped, even if that leaves the
+        // dashboard empty — showing tiles that can never populate is worse than
+        // an honest empty state. A PID in a range whose bitmap never answered
+        // is a different thing: it is unknown, and dropping it is how one
+        // missed reply turned a 28-PID car into a 1-PID dashboard.
         signals = chosen.filter { signal in
             guard let pid = signal.pidValue else { return false }
-            return supportedPIDs.contains(pid)
+            return discoveryResult.shouldPoll(pid)
         }
     }
 
@@ -1584,10 +1618,11 @@ final class LiveModel {
         noteSample(at: sampleTime)
 
         // The ECU may have been asleep when we probed. Now that it is answering,
-        // ask again so an unnecessary empty capability set is not recorded.
-        if discovery == .failed, !discoveryRetryDone {
+        // ask again so an unnecessary empty capability set is not recorded —
+        // including a pass that lost a bitmap to the wake.
+        if discoveryResult.needsRetry, !discoveryRetryDone {
             discoveryRetryDone = true
-            await discoverCapabilities(using: elm)
+            await discoverCapabilities(using: elm, into: discoveryResult)
             guard isCurrent(generation) else { return }
             rebuildSignalList()
         }
@@ -1752,6 +1787,11 @@ final class LiveModel {
 
         guard let frame, let hex else { return }
 
+        // A parsed `0x21` frame is proof the manufacturer service works, which
+        // one connect-time probe is not: the probe can lose the race with a
+        // waking ECU, and a manifest written from it alone can claim the
+        // service never answered while the samples above say otherwise.
+        manufacturerServiceAvailable = true
         let decodedValues = profile.decode(frame)
         let sampleTime = Date()
 
@@ -1839,6 +1879,8 @@ final class LiveModel {
         guard !Task.isCancelled else { return nil }
         _ = try? await elm.send("ATSH7DF", timeout: 2)
         guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return nil }
+        // The service answered, whatever the connect-time probe concluded.
+        manufacturerServiceAvailable = true
         return role.value(in: profile.decode(frame)).map(Int.init)
     }
 

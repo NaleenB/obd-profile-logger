@@ -71,11 +71,16 @@ public final class RecordingSession {
     /// Discovery can fail at connect, while the ECU is still asleep, and succeed
     /// once it answers. Record the outcome that held for the session rather than
     /// the state at the moment the manifest was first written.
-    public func updateDiscovery(capabilityDiscovery: String, supportedPIDs: [String]?) {
+    public func updateDiscovery(
+        capabilityDiscovery: String,
+        supportedPIDs: [String]?,
+        unansweredPIDBases: [String]? = nil
+    ) {
         guard let recorder else { return }
         recorder.updateManifest {
             $0.capabilityDiscovery = capabilityDiscovery
             $0.supportedPIDs = supportedPIDs
+            $0.unansweredPIDBases = unansweredPIDBases
         }
     }
 

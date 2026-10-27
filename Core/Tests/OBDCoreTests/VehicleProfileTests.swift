@@ -120,6 +120,21 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertNil(profile.decode(storedMax).first { $0.itemNumber == 127 })
     }
 
+    /// Captured from the car: LID 0x5B pinned 0xE6 on the "before UCC" sensor it
+    /// does not have and 0xB0 on the stored maximum. Both decoded to plausible
+    /// temperatures (950 °C and 1360 °C) and were recorded in every session
+    /// until they were declared unavailable.
+    func testPinnedDPFTemperaturesInLid5BAreNotRecorded() throws {
+        let profile = try shippedProfile()
+        let frame = try XCTUnwrap(MUT21Frame(hex: "615BE65747B000"))
+        let decoded = profile.decode(frame)
+
+        XCTAssertNil(decoded.first { $0.itemNumber == 374 }, "0xE6 is the missing sensor, not 950 °C")
+        XCTAssertNil(decoded.first { $0.itemNumber == 377 }, "0xB0 is the unset maximum, not 1360 °C")
+        XCTAssertNotNil(decoded.first { $0.itemNumber == 375 }, "the live sensors still decode")
+        XCTAssertNotNil(decoded.first { $0.itemNumber == 376 })
+    }
+
     func testUnknownLIDDecodesToNothing() throws {
         let profile = try shippedProfile()
         let frame = try XCTUnwrap(MUT21Frame(hex: "61FF00"))

@@ -65,6 +65,25 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(written.notes.contains { $0.contains("did not answer at session start") })
     }
 
+    /// A partial capability pass has to survive into the manifest: the PID list
+    /// alone would otherwise read as the car's whole capability.
+    func testPartialDiscoveryRecordsTheUnansweredBitmap() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        session.updateDiscovery(
+            capabilityDiscovery: "succeeded",
+            supportedPIDs: ["42", "45", "49", "4A", "4C", "4D", "4E"],
+            unansweredPIDBases: ["00", "20"]
+        )
+        session.stop(reason: "test")
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.unansweredPIDBases, ["00", "20"])
+        XCTAssertEqual(written.supportedPIDs?.count, 7)
+    }
+
     /// A profile can resolve while recording: the manifest and the archived
     /// decoding rules both have to end up describing the samples.
     func testProfileCanBeUpdatedAfterResolution() throws {
