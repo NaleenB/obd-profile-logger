@@ -120,6 +120,30 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertNil(profile.decode(storedMax).first { $0.itemNumber == 127 })
     }
 
+    /// Captured from the car: LID 0x5B pinned 0xE6 on the "before UCC" sensor it
+    /// does not have and 0xB0 on the stored maximum. Both decoded to plausible
+    /// temperatures (950 °C and 1360 °C) and were recorded in every session
+    /// until they were declared unavailable.
+    func testPinnedDPFTemperaturesInLid5BAreNotRecorded() throws {
+        let profile = try shippedProfile()
+        let frame = try XCTUnwrap(MUT21Frame(hex: "615BE65747B000"))
+        let decoded = profile.decode(frame)
+
+        XCTAssertNil(decoded.first { $0.itemNumber == 374 }, "0xE6 is the missing sensor, not 950 °C")
+        XCTAssertNil(decoded.first { $0.itemNumber == 377 }, "0xB0 is the unset maximum, not 1360 °C")
+        XCTAssertNotNil(decoded.first { $0.itemNumber == 375 }, "the live sensors still decode")
+        XCTAssertNotNil(decoded.first { $0.itemNumber == 376 })
+    }
+
+    /// Standard and manufacturer reads must address the engine module rather
+    /// than taking whichever broadcast frame arrived first.
+    func testShippedProfileAddressesTheEngineModule() throws {
+        let profile = try shippedProfile()
+        XCTAssertEqual(profile.engineRequestHeader, "7E0")
+        XCTAssertEqual(profile.standardRequestHeader, "7E0")
+        XCTAssertEqual(profile.manufacturerRequestHeader, "7E0")
+    }
+
     func testUnknownLIDDecodesToNothing() throws {
         let profile = try shippedProfile()
         let frame = try XCTUnwrap(MUT21Frame(hex: "61FF00"))
@@ -296,6 +320,8 @@ final class GenericProfileTests: XCTestCase {
         XCTAssertTrue(generic.blocks.isEmpty, "a generic profile has no manufacturer data")
         XCTAssertNil(generic.service.readByLocalIdentifier)
         XCTAssertGreaterThanOrEqual(generic.signals.count, 10)
+        XCTAssertEqual(generic.engineRequestHeader, "7E0")
+        XCTAssertEqual(generic.standardRequestHeader, "7E0")
     }
 
     func testGenericProfileDecodesLikeAnyOther() throws {

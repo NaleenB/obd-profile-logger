@@ -76,3 +76,28 @@ final class SilenceWatchdogTests: XCTestCase {
         XCTAssertGreaterThan(watchdog.quietAfter, watchdog.noticeAfter)
     }
 }
+
+final class QuietProbeTests: XCTestCase {
+
+    private func signal(_ pid: String) -> VehicleProfile.StandardSignal {
+        VehicleProfile.StandardSignal(
+            pid: pid, name: pid, unit: "", bytes: 1,
+            factor: 1, offset: 0, decimals: 0)
+    }
+
+    func testEngineSpeedIsPreferred() {
+        let chosen = QuietProbe.choose(from: [signal("42"), signal("0C")])
+        XCTAssertEqual(chosen?.pid, "0C")
+    }
+
+    /// A profile without rpm must still send something. The old guard returned
+    /// before any request, so a waking car could never leave quiet mode.
+    func testProfileWithoutEngineSpeedStillGetsAProbe() {
+        let chosen = QuietProbe.choose(from: [signal("42")])
+        XCTAssertEqual(chosen?.pid, "42")
+    }
+
+    func testNoSignalsHasNoProbe() {
+        XCTAssertNil(QuietProbe.choose(from: []))
+    }
+}

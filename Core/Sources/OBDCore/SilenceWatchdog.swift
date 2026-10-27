@@ -1,5 +1,19 @@
 import Foundation
 
+/// Chooses the request that proves a sleeping car has woken.
+///
+/// Engine speed is the best probe because it changes as soon as the engine
+/// turns. A profile that does not define PID `0C` must still ask for something:
+/// returning without sending a request makes quiet mode a one-way door.
+public enum QuietProbe {
+    public static func choose(
+        from signals: [VehicleProfile.StandardSignal]
+    ) -> VehicleProfile.StandardSignal? {
+        signals.first(where: { $0.pid == "0C" })
+            ?? signals.first(where: { $0.pidValue != nil })
+    }
+}
+
 /// Decides what the poll loop should do when the car — not the adapter — stops
 /// answering.
 ///

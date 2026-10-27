@@ -2896,7 +2896,8 @@
           "observed": {
             "raw": 230,
             "value": 950.0
-          }
+          },
+          "unavailableRaw": [230]
         },
         {
           "itemNumber": 375,
@@ -2935,7 +2936,8 @@
           "observed": {
             "raw": 176,
             "value": 1360.0
-          }
+          },
+          "unavailableRaw": [176]
         },
         {
           "itemNumber": 378,

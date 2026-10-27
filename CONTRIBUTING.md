@@ -54,6 +54,9 @@ cd Core && swift test
 cd ../Link && swift test
 cd ../Probe && swift test
 cd ../Probe && ./run.sh --self-test
+cd ../App && xcodegen generate
+xcodebuild test -project OBDLogger.xcodeproj -scheme OBDLogger-macOS \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 git diff --check
 ```
 
@@ -71,8 +74,8 @@ Planned, in rough order. Nothing here is committed to a date.
 | ~~Profile-driven standard PIDs~~ | done — both shipped profiles define their own signal list and scaling |
 | ~~Profile picker~~ | done — then removed: identification is automatic and there is no picker |
 | ~~Background recording~~ | done — verified on the iPhone with the screen locked |
-| ~~CI~~ | done — Core, Link and Probe tests plus both app builds on every push |
-| App coordinator tests | connection ownership is now generation-based, but the SwiftUI model still needs a fake-link seam for integration tests |
+| ~~CI~~ | done — Core, Link and Probe tests, app coordinator tests and both app builds on every push |
+| App coordinator integration tests | session-boundary and profile state are covered; a fake-link seam for connect/reconnect timing is still missing |
 | Quiet mode on hardware | the loop degrades once the car stops answering; not yet watched going quiet and waking again |
 | Stale-peripheral recovery | the rescan fallback is shared by connect and reconnect; not yet induced on a phone |
 | Baseline learning | compare a drive against the car's own normal, not just factory limits |

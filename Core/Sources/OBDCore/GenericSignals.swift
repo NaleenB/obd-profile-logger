@@ -59,8 +59,12 @@ public enum PIDCapabilities {
         return expand(bitmap: Array(bytes.prefix(4)), base: base)
     }
 
-    /// The bitmap queries worth asking, in order.
-    public static let probePIDs: [UInt8] = [0x00, 0x20, 0x40, 0x60]
+    /// Every standard supported-PID bitmap. The probe stops at the first gap
+    /// the car does not declare, so this costs nothing on a vehicle that ends at
+    /// `0x60` but keeps ranges above it unknown rather than unsupported.
+    public static let probePIDs: [UInt8] = [
+        0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0
+    ]
 
     private static func bytes(fromHex hex: String) -> [UInt8]? {
         let cleaned = hex.filter { !$0.isWhitespace }

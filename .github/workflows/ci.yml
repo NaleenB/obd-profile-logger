@@ -51,6 +51,11 @@ jobs:
           cd App
           xcodebuild -project OBDLogger.xcodeproj -scheme OBDLogger-macOS \
             -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: App coordinator tests
+        run: |
+          cd App
+          xcodebuild test -project OBDLogger.xcodeproj -scheme OBDLogger-macOS \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
       - name: Build iOS simulator
         run: |
           cd App

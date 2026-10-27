@@ -65,6 +65,46 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(written.notes.contains { $0.contains("did not answer at session start") })
     }
 
+    /// A partial capability pass has to survive into the manifest: the PID list
+    /// alone would otherwise read as the car's whole capability.
+    func testPartialDiscoveryRecordsTheUnansweredBitmap() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        session.updateDiscovery(
+            capabilityDiscovery: "succeeded",
+            supportedPIDs: ["42", "45", "49", "4A", "4C", "4D", "4E"],
+            unansweredPIDBases: ["20"]
+        )
+        session.stop(reason: "test")
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let written = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(written.unansweredPIDBases, ["20"])
+        XCTAssertEqual(written.supportedPIDs?.count, 7)
+    }
+
+    /// Discovery can improve after the first sample. The manifest must describe
+    /// that improvement immediately, because a killed process never reaches the
+    /// stop path that used to write it.
+    func testDiscoveryUpdateReachesDiskBeforeTheSessionEnds() throws {
+        let session = try started()
+        let directory = try XCTUnwrap(session.directory)
+
+        session.updateDiscovery(
+            capabilityDiscovery: "succeeded",
+            supportedPIDs: ["05", "0C", "0D", "42"],
+            unansweredPIDBases: nil
+        )
+
+        let data = try Data(contentsOf: directory.appendingPathComponent(SessionRecorder.manifestFilename()))
+        let whileOpen = try JSONDecoder().decode(SessionManifest.self, from: data)
+        XCTAssertEqual(whileOpen.capabilityDiscovery, "succeeded")
+        XCTAssertEqual(whileOpen.supportedPIDs, ["05", "0C", "0D", "42"])
+        XCTAssertNil(whileOpen.unansweredPIDBases)
+        XCTAssertNil(whileOpen.finishedAt)
+    }
+
     /// A profile can resolve while recording: the manifest and the archived
     /// decoding rules both have to end up describing the samples.
     func testProfileCanBeUpdatedAfterResolution() throws {

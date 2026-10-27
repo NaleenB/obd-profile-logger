@@ -64,6 +64,12 @@ the frames are simply concatenated in the response:
 Keep frames separate and pick the intended module. With headers on, the CAN ID
 prefix identifies the responder (`7E8` = engine, `7E9` = transmission).
 
+The app addresses standard mode `01`, identity and capability requests to the
+engine header (`7E0` on 11-bit CAN, or the profile's named ECM module) so
+`payloadHex` cannot silently become the transmission's reply. Non-CAN protocols
+and 29-bit CAN keep broadcast: `7E0` is an 11-bit address and is not valid there.
+A 29-bit vehicle must name its own engine header in its profile.
+
 ## Services
 
 | Service | Purpose | Notes |

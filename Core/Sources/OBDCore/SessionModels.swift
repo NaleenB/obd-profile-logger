@@ -31,6 +31,10 @@ public struct SessionManifest: Codable, Equatable {
     /// "succeeded" or "failed". An empty `supportedPIDs` alone cannot express
     /// the difference between "the car supports nothing" and "we could not ask".
     public var capabilityDiscovery: String?
+    /// Bitmaps the ECU declared that never answered. Their ranges were polled
+    /// without being checked against it, so `supportedPIDs` describes only the
+    /// part of the car the bitmaps reached. Absent when discovery was complete.
+    public var unansweredPIDBases: [String]?
     /// How the vehicle profile was chosen: calibration, vin, agreement, none or
     /// override (development only). A wrong decode can be traced from this.
     public var profileMatch: String?
@@ -60,6 +64,7 @@ public struct SessionManifest: Codable, Equatable {
         adapterIdentifier: String? = nil,
         supportedPIDs: [String]? = nil,
         capabilityDiscovery: String? = nil,
+        unansweredPIDBases: [String]? = nil,
         profileMatch: String? = nil,
         profileHash: String? = nil,
         timezoneOffsetSeconds: Int? = nil,
@@ -79,6 +84,7 @@ public struct SessionManifest: Codable, Equatable {
         self.adapterIdentifier = adapterIdentifier
         self.supportedPIDs = supportedPIDs
         self.capabilityDiscovery = capabilityDiscovery
+        self.unansweredPIDBases = unansweredPIDBases
         self.profileMatch = profileMatch
         self.profileHash = profileHash
         self.timezoneOffsetSeconds = timezoneOffsetSeconds

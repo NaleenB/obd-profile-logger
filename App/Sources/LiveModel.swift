@@ -59,7 +59,6 @@ final class LiveModel {
 
     private let battery = BatteryMonitor()
     private let batteryClock = UptimeClock()
-    private var lastVolts: Double?
     private var lastRPM: Double?
     private(set) var batteryReport: BatteryReport?
     private var batteryLogged = false
@@ -177,6 +176,69 @@ final class LiveModel {
         sweep = SweepPass(planned: profile?.localIdentifiers ?? [])
     }
 
+    /// A manual connection starts a new vehicle session. Reusing the profile a
+    /// previous car proved would decode the new car's manufacturer blocks with
+    /// the wrong offsets and stamp the manifest with a match that never
+    /// happened.
+    ///
+    /// An in-session reconnect deliberately does not call this: it is still the
+    /// same car and must keep the profile and its odometer context.
+    func resetForNewSession() {
+        // Clear the previous session's notice before the profile load can set a
+        // real one (an unavailable bundled profile).
+        notice = nil
+        if let overrideProfileID {
+            loadProfile(id: overrideProfileID)
+            profileMatchMethod = ProfileResolver.Method.override.rawValue
+        } else {
+            loadProfile(id: ProfileCatalog.genericID)
+            profileMatchMethod = ProfileResolver.Method.none.rawValue
+        }
+        profileReason = ""
+        manufacturerServiceAvailable = false
+        identity = VehicleIdentity()
+        identityResolved = false
+        identificationAttempts = 0
+        identificationExhausted = false
+        verificationDone = false
+        lastVerificationAttempt = .distantPast
+        nextIdentificationAt = Date()
+
+        diagnostics = nil
+        diagnosticsAt = nil
+        batteryReport = nil
+        batteryLogged = false
+        runningSince = nil
+        odometerKm = nil
+        odometerStartKm = nil
+        ambientTempC = nil
+        lastOdometerRead = .distantPast
+        lastDTCStep = .distantPast
+        manufacturerProbeTimings = [:]
+
+        supportedPIDs = []
+        discoveryResult = PIDDiscovery()
+        discovery = .notRun
+        discoveryRetryDone = false
+        discoveryAtRecordingStart = .notRun
+
+        lastSampleAt = nil
+        firstSampleAt = nil
+        lastRPM = nil
+        supplyVolts = nil
+        connectedAt = nil
+        lastLoopTick = nil
+        engineStoppedSince = nil
+        didInitialReads = false
+        gapMonitor = DataGapMonitor(threshold: 10)
+        battery.reset()
+        protocolDescription = ""
+        detectedProtocolNumber = nil
+        readings.clear()
+        dpf = nil
+        rebuildSignalList()
+    }
+
     /// A profile is applied only when the required discriminators agree on three
     /// consecutive probes. The probes are a few hundred milliseconds apart, so
     /// identification still completes in seconds.
@@ -250,7 +312,7 @@ final class LiveModel {
         guard !probeLIDs.isEmpty else { return (standard, decoded) }
 
         var frames: [UInt8: MUT21Frame] = [:]
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        await selectManufacturerHeader(using: elm)
         for lid in probeLIDs.sorted() {
             guard !Task.isCancelled else { return (standard, decoded) }
             if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
@@ -259,7 +321,8 @@ final class LiveModel {
                 frames[lid] = frame
             }
         }
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
+        if !frames.isEmpty { manufacturerServiceAvailable = true }
 
         for profile in candidateProfiles {
             guard let spec = profile.identity else { continue }
@@ -359,7 +422,7 @@ final class LiveModel {
     /// Applies a resolution. A change of profile mid-session is recorded rather
     /// than hidden: the samples carry their own names and units, so a boundary
     /// event is enough to attribute them.
-    private func apply(_ resolution: ProfileResolver.Resolution) {
+    func apply(_ resolution: ProfileResolver.Resolution) {
         guard let id = resolution.profileID else {
             profileMatchMethod = ProfileResolver.Method.none.rawValue
             return
@@ -411,8 +474,10 @@ final class LiveModel {
     /// Standard PID for a discriminator, decoded with a profile's own scaling so
     /// no formula is hardcoded here.
     private func readStandard(_ pid: UInt8, using elm: ELMClient) async -> Double? {
-        guard let reply = try? await elm.send(String(format: "01%02X", pid), timeout: 2),
-              let hex = reply.payloadHex,
+        await selectEngineHeader(using: elm)
+        let reply = try? await elm.send(String(format: "01%02X", pid), timeout: 2)
+        await restoreBroadcastHeader(using: elm)
+        guard let hex = reply?.payloadHex,
               hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4)))
         else { return nil }
@@ -435,18 +500,19 @@ final class LiveModel {
         lastVerificationAttempt = Date()
 
         var values: [Int: Double] = [:]
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        await selectManufacturerHeader(using: elm)
         for lid in spec.lidValues {
             guard !Task.isCancelled else { return }
             if let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
                let hex = reply.payloadHex,
                let frame = MUT21Frame(hex: hex) {
+                manufacturerServiceAvailable = true
                 for value in profile.decode(frame) {
                     if let item = value.itemNumber { values[item] = value.value }
                 }
             }
         }
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
 
         guard isCurrent(generation) else { return }
 
@@ -487,12 +553,14 @@ final class LiveModel {
     /// apply to this specific ECU.
     private func readIdentity(using elm: ELMClient) async -> VehicleIdentity {
         var identity = VehicleIdentity()
+        await selectEngineHeader(using: elm)
         if let reply = try? await elm.send("0902", timeout: 5), let hex = reply.payloadHex {
             identity.vin = VehicleIdentityDecoder.vin(fromHex: hex)
         }
         if let reply = try? await elm.send("0904", timeout: 5), let hex = reply.payloadHex {
             identity.calibrationID = VehicleIdentityDecoder.calibrationID(fromHex: hex)
         }
+        await restoreBroadcastHeader(using: elm)
         return identity
     }
 
@@ -510,7 +578,7 @@ final class LiveModel {
         let probeStart = Date()
 
         let headerStart = Date()
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        await selectManufacturerHeader(using: elm)
         timings["selectHeaderMs"] = Self.millis(Date().timeIntervalSince(headerStart) * 1000)
 
         let replyStart = Date()
@@ -518,7 +586,7 @@ final class LiveModel {
         timings["mutReplyMs"] = Self.millis(Date().timeIntervalSince(replyStart) * 1000)
 
         let restoreStart = Date()
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
         timings["restoreHeaderMs"] = Self.millis(Date().timeIntervalSince(restoreStart) * 1000)
 
         timings["probeTotalMs"] = Self.millis(Date().timeIntervalSince(probeStart) * 1000)
@@ -605,6 +673,9 @@ final class LiveModel {
     /// PIDs the ECU advertised, and whether asking worked at all.
     private(set) var supportedPIDs: Set<UInt8> = []
     private(set) var discovery: DiscoveryState = .notRun
+    /// Which bitmaps actually answered. `supportedPIDs` alone cannot say
+    /// whether a missing PID was withheld by the car or never asked about.
+    private var discoveryResult = PIDDiscovery()
     private var discoveryRetryDone = false
     /// Discovery state when the manifest was first written. A cold start can
     /// fail here and succeed later, so the stop path records the final result.
@@ -641,6 +712,11 @@ final class LiveModel {
         guard phase != .connected, phase != .connecting else { return }
         cancelReconnect()
         intentionalDisconnect = false
+        // A manual connect is a new session. While recording, a reconnect is
+        // resuming the same car and must keep the resolved profile.
+        if !isRecording {
+            resetForNewSession()
+        }
 
         transport.onDisconnect = { [weak self] reason in
             Task { @MainActor in self?.handleTransportDisconnect(reason) }
@@ -691,24 +767,23 @@ final class LiveModel {
                 }
                 let elmMs = Date().timeIntervalSince(elmBegan) * 1000
 
+                if let reply = try? await client.send("ATDPN", timeout: 2) {
+                    let number = reply.statusSummary
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !number.isEmpty { detectedProtocolNumber = number }
+                }
+                guard self.isCurrent(generation) else { return }
+
                 manufacturerServiceAvailable = await detectManufacturerService(using: client)
                 guard self.isCurrent(generation) else { return }
-                identity = VehicleIdentity()
-                identityResolved = false
-                identificationAttempts = 0
-                identificationExhausted = false
-                verificationDone = false
-                lastVerificationAttempt = .distantPast
-                profileReason = ""
                 nextIdentificationAt = Date()
 
                 let discoveryStarted = Date()
-                await discoverCapabilities(using: client)
+                await discoverCapabilities(using: client, generation: generation)
                 guard self.isCurrent(generation) else { return }
                 let capabilityDiscoveryMs = Date().timeIntervalSince(discoveryStarted) * 1000
                 rebuildSignalList()
 
-                lastVolts = nil
                 lastRPM = nil
                 battery.reset()
                 batteryLogged = false
@@ -795,13 +870,13 @@ final class LiveModel {
         elm = nil
         // Capture this before clearing readings: a gap is not ended by the link
         // dropping, and the last genuine answer is what defines its duration.
-        lastSampleAt = lastUpdate ?? lastSampleAt
+        lastSampleAt = lastVehicleAnswerAt
         readings.clear()
         dpf = nil
         lastRPM = nil
-        lastVolts = nil
-        batteryLogged = false
-        runningSince = nil
+        // `batteryLogged` and `runningSince` survive a link outage: the engine
+        // did not stop because Bluetooth did, and AGENTS.md requires one battery
+        // report per engine cycle rather than one per connection.
         supplyVolts = nil
 
         session.event(.adapterDisconnected, ["reason": reason])
@@ -960,11 +1035,20 @@ final class LiveModel {
                     if let protocolValue = self.profile?.elmProtocol {
                         _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
                     }
+                    if let reply = try? await client.send("ATDPN", timeout: 2) {
+                        let number = reply.statusSummary
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !number.isEmpty { self.detectedProtocolNumber = number }
+                    }
                     guard self.isCurrent(generation) else { return }
 
                     self.elm = client
                     KnownAdapter.save(uuid: candidate.peripheral.identifier, name: candidate.name)
                     self.phase = .connected
+                    self.connectedAt = Date()
+                    // A retry interrupted by the link drop must be allowed to
+                    // run on the replacement connection.
+                    self.discoveryRetryDone = false
                     self.status = "Connected"
                     self.session.event(.adapterReconnected, [
                         "attempt": String(attempt),
@@ -1056,6 +1140,9 @@ final class LiveModel {
                 ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
                 : nil,
             capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            unansweredPIDBases: discoveryResult.unansweredBases.isEmpty
+                ? nil
+                : discoveryResult.unansweredBases.sorted().map { String(format: "%02X", $0) },
             profileMatch: profileMatchMethod,
             profileHash: profileHash,
             timezoneOffsetSeconds: TimeZone.current.secondsFromGMT(),
@@ -1103,14 +1190,12 @@ final class LiveModel {
         // Record what discovery actually achieved during the session. Writing
         // only the connect-time result would report "failed" for a cold start
         // that resolved itself once the ECU woke.
-        session.updateDiscovery(
-            capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
-            supportedPIDs: discovery == .succeeded
-                ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
-                : nil
-        )
+        persistDiscoveryIfRecording()
         if discoveryAtRecordingStart != .succeeded, discovery == .succeeded {
             session.appendNote("Capability discovery did not answer at session start and succeeded once the ECU was awake.")
+        }
+        if !discoveryResult.unansweredBases.isEmpty {
+            session.appendNote("Capability discovery left a PID bitmap unanswered, so its range was polled without being checked against the ECU.")
         }
         session.updateProfile(
             id: profileID,
@@ -1191,22 +1276,25 @@ final class LiveModel {
 
     // MARK: - Battery
 
-    private func feedBatteryMonitor(pid: UInt8, value: Double) {
-        switch pid {
-        case 0x42: lastVolts = value
-        case 0x0C: lastRPM = value
-        default: return
-        }
-        guard let volts = lastVolts else { return }
-
-        battery.ingest(VoltageSample(atMs: batteryClock.nowMs(), volts: volts, rpm: lastRPM))
+    /// Feeds one complete cycle, not one signal at a time.
+    ///
+    /// Both inputs are optional and belong to the same pass. Passing a cached
+    /// RPM beside a fresh crank voltage hides the dip; passing a cached voltage
+    /// beside a fresh RPM records a crank minimum from several seconds earlier.
+    private func feedBatteryMonitor(volts: Double, rpm: Double?, now: Date = Date()) {
+        battery.ingest(VoltageSample(atMs: batteryClock.nowMs(), volts: volts, rpm: rpm))
 
         // A new start inside one connection is a new cycle. The monitor latches
         // "running", so without this the next crank would never be measured.
-        if battery.currentPhase == .running, (lastRPM ?? 0) < 400 {
-            if engineStoppedSince == nil { engineStoppedSince = Date() }
+        // A stop needs a current rpm to be believed. This car's charging floats
+        // between 12.6 and 14.5 V by design, so a voltage dip is not a stop —
+        // and treating a missing rpm as zero reported a stop after every
+        // sample, resetting the monitor and re-emitting a report every few
+        // seconds.
+        if battery.currentPhase == .running, let rpm, rpm < 400 {
+            if engineStoppedSince == nil { engineStoppedSince = now }
             if let since = engineStoppedSince,
-               Date().timeIntervalSince(since) > 5,
+               now.timeIntervalSince(since) > 5,
                batteryLogged {
                 battery.reset()
                 batteryLogged = false
@@ -1218,13 +1306,13 @@ final class LiveModel {
         }
 
         guard battery.currentPhase == .running else { return }
-        if runningSince == nil { runningSince = Date() }
+        if runningSince == nil { runningSince = now }
 
         // Wait for the alternator to settle before reporting: an immediate
         // snapshot has no charging voltage to show.
         guard !batteryLogged,
               let since = runningSince,
-              Date().timeIntervalSince(since) >= 5,
+              now.timeIntervalSince(since) >= 5,
               battery.chargingSettled
         else { return }
 
@@ -1261,33 +1349,110 @@ final class LiveModel {
     // MARK: - Capability discovery
 
     private(set) var protocolDescription = ""
+    /// `ATDPN` as reported by the adapter, used to choose a valid module header.
+    private var detectedProtocolNumber: String?
+
+    private var protocolIdentifier: String? {
+        detectedProtocolNumber ?? profile?.transport?.elmProtocol
+    }
+
+    /// Standard OBD is normally read by broadcast, but this car has both an ECM
+    /// and a TCM answering `7DF`. Taking the first frame then attributes the
+    /// transmission's speed or bitmap to the engine. Addressing the profile's
+    /// ECM makes the responder unambiguous without enabling headers (which
+    /// latches this clone's receive filter).
+    ///
+    /// A non-CAN bus must keep broadcast: `7E0` is a CAN header, and sending it
+    /// to an ISO 9141 or KWP vehicle loses the request rather than selecting an
+    /// engine module. The same applies to 29-bit CAN, where the profile's
+    /// `7E0` is an 11-bit address; `OBDProtocol.engineHeader` makes that choice
+    /// for both standard and manufacturer traffic.
+    private var standardHeader: String {
+        OBDProtocol.engineHeader(
+            profileHeader: profile?.engineRequestHeader,
+            protocolIdentifier: protocolIdentifier)
+    }
+
+    /// Manufacturer service `0x21` is read from the engine module too. A
+    /// profile that names a different ECM header is trusted by the shared
+    /// helper; a profile with no ECM keeps the same protocol-aware fallback.
+    private var manufacturerHeader: String { standardHeader }
+
+    private func selectEngineHeader(using elm: ELMClient) async {
+        _ = try? await elm.send("ATSH\(standardHeader)", timeout: 2)
+    }
+
+    private func selectManufacturerHeader(using elm: ELMClient) async {
+        _ = try? await elm.send("ATSH\(manufacturerHeader)", timeout: 2)
+    }
+
+    private func restoreBroadcastHeader(using elm: ELMClient) async {
+        _ = try? await elm.send("ATSH7DF", timeout: 2)
+    }
 
     /// True when the ECU answers a basic request, used to validate a pinned
     /// protocol before trusting it.
     private func ECUResponds(using elm: ELMClient) async -> Bool {
+        await selectEngineHeader(using: elm)
         guard let reply = try? await elm.send("0100", timeout: 5),
               let hex = reply.payloadHex, hex.hasPrefix("4100")
         else { return false }
         return true
     }
 
-    /// Asks which PIDs the vehicle supports. Purely additive: if every probe
-    /// fails, `supportedPIDs` stays empty and nothing is filtered.
-    private func discoverCapabilities(using elm: ELMClient) async {
-        var found: Set<UInt8> = []
-        for base in PIDCapabilities.probePIDs {
+    /// Asks which PIDs the vehicle supports.
+    ///
+    /// Each bitmap is trusted only for its own range, so a pass that stops at a
+    /// gap leaves the higher ranges unknown rather than unsupported. Retrying
+    /// carries the earlier answers in, so a second pass costs one request.
+    private func discoverCapabilities(
+        using elm: ELMClient,
+        into previous: PIDDiscovery = PIDDiscovery(),
+        generation: ConnectionEpoch.Token
+    ) async {
+        guard isCurrent(generation) else { return }
+        var result = previous
+        await selectEngineHeader(using: elm)
+        while let base = result.nextProbe() {
+            guard isCurrent(generation) else { return }
             let command = String(format: "01%02X", base)
-            guard let reply = try? await elm.send(command, timeout: 2),
-                  let hex = reply.payloadHex,
-                  let supported = PIDCapabilities.supported(fromHex: hex, base: base)
-            else { continue }
-            found.formUnion(supported)
-            if supported.isEmpty { break }
+            let reply = try? await elm.send(command, timeout: 2)
+            guard isCurrent(generation) else { return }
+            guard let hex = reply?.payloadHex,
+                  let supported = PIDCapabilities.supported(fromHex: hex, base: base),
+                  !supported.isEmpty
+            else {
+                // Stop at the first gap. A later retry can fill it; probing
+                // above an unanswered bitmap cannot make the pass authoritative.
+                break
+            }
+            // An all-zero bitmap would say "this car supports nothing", which no
+            // compliant vehicle does; padding or a truncated read is likelier,
+            // so it is treated as no answer rather than as an empty car.
+            result.record(base: base, pids: supported)
         }
-        supportedPIDs = found
-        // A valid bitmap always advertises at least one PID, so an empty result
-        // means every probe failed rather than "this car supports nothing".
-        discovery = found.isEmpty ? .failed : .succeeded
+        guard isCurrent(generation) else { return }
+        discoveryResult = result
+        supportedPIDs = result.supportedPIDs
+        // A pass that answered only a higher bitmap learned nothing usable:
+        // without the first one there is no way to tell which PIDs exist.
+        discovery = result.isRooted ? .succeeded : .failed
+    }
+
+    /// Discovery can improve after the first sample. Persist immediately, not
+    /// only at stop: an interrupted session must not keep claiming the cold-start
+    /// failure while its samples were collected after the car woke.
+    private func persistDiscoveryIfRecording() {
+        guard isRecording else { return }
+        session.updateDiscovery(
+            capabilityDiscovery: discovery == .succeeded ? "succeeded" : "failed",
+            supportedPIDs: discovery == .succeeded
+                ? supportedPIDs.sorted().map { String(format: "%02X", $0) }
+                : nil,
+            unansweredPIDBases: discoveryResult.unansweredBases.isEmpty
+                ? nil
+                : discoveryResult.unansweredBases.sorted().map { String(format: "%02X", $0) }
+        )
     }
 
     /// Profile signals if it has any, otherwise the generic baseline — then
@@ -1302,12 +1467,15 @@ final class LiveModel {
             return
         }
 
-        // Discovery succeeded: trust it. A PID the ECU does not advertise is
-        // dropped, even if that leaves the dashboard empty — showing tiles that
-        // can never populate is worse than an honest empty state.
+        // Discovery succeeded: trust it, but only for the ranges it reached. A
+        // PID the ECU does not advertise is dropped, even if that leaves the
+        // dashboard empty — showing tiles that can never populate is worse than
+        // an honest empty state. A PID in a range whose bitmap never answered
+        // is a different thing: it is unknown, and dropping it is how one
+        // missed reply turned a 28-PID car into a 1-PID dashboard.
         signals = chosen.filter { signal in
             guard let pid = signal.pidValue else { return false }
-            return supportedPIDs.contains(pid)
+            return discoveryResult.shouldPoll(pid)
         }
     }
 
@@ -1330,7 +1498,7 @@ final class LiveModel {
         stallWatchdog = nil
         pollTask?.cancel()
         pollTask = nil
-        lastSampleAt = lastUpdate ?? lastSampleAt
+        lastSampleAt = lastVehicleAnswerAt
         reportGapTransition(gapMonitor.finish(now: Date(), reason: .stalled))
         // A half-finished scan belongs to the connection that died. Carrying it
         // across the reconnect would assemble one result from two buses.
@@ -1340,6 +1508,8 @@ final class LiveModel {
         lastLoopTick = nil
         readings.clear()
         dpf = nil
+        lastRPM = nil
+        supplyVolts = nil
         if isRecording {
             beginReconnect()
         } else {
@@ -1366,7 +1536,7 @@ final class LiveModel {
     func appDidChangePhase(_ phase: AppPhase, now: Date = Date()) {
         guard isRecording else { return }
         var details = ["phase": phase.rawValue]
-        if let last = lastUpdate {
+        if let last = lastVehicleAnswerAt {
             details["quietSeconds"] = String(Int(now.timeIntervalSince(last).rounded()))
         }
         session.event(.appLifecycle, details)
@@ -1374,10 +1544,26 @@ final class LiveModel {
 
     // MARK: - Silence
 
+    /// The last genuine vehicle answer. `readings.lastUpdate` is cleared when a
+    /// link drops, but `lastSampleAt` deliberately survives.
+    private var lastVehicleAnswerAt: Date? {
+        VehicleActivity.lastAnswer(lastUpdate: lastUpdate, lastSampleAt: lastSampleAt)
+    }
+
+    /// Silence and the idle watchdog use the same reference. A reconnect used
+    /// to pass the original `connectedAt` here, which made a five-second outage
+    /// after a long drive look fifteen minutes silent and immediately time out.
+    private var silenceReference: Date? {
+        VehicleActivity.silenceReference(
+            lastUpdate: lastUpdate,
+            lastSampleAt: lastSampleAt,
+            connectedAt: connectedAt)
+    }
+
     /// True while the car — not the adapter — has stopped answering.
     func isVehicleSilent(now: Date = Date()) -> Bool {
         guard isConnected else { return false }
-        return silence.isNoticeable(now: now, reference: lastUpdate ?? connectedAt)
+        return silence.isNoticeable(now: now, reference: silenceReference)
     }
 
     /// One line for the header, or nil while the car is answering.
@@ -1387,7 +1573,7 @@ final class LiveModel {
     func silenceNotice(now: Date = Date()) -> String? {
         guard isVehicleSilent(now: now) else { return nil }
         var parts = ["Vehicle not responding"]
-        if let last = lastUpdate {
+        if let last = lastVehicleAnswerAt {
             parts.append("last reading \(Int(now.timeIntervalSince(last).rounded())) s ago")
         } else {
             parts.append("no reading since connecting")
@@ -1422,10 +1608,10 @@ final class LiveModel {
                 // data_gap in the log and looked like a frozen app.
                 reportGapTransition(gapMonitor.update(
                     now: Date(),
-                    lastSampleAt: lastUpdate ?? lastSampleAt))
+                    lastSampleAt: lastVehicleAnswerAt))
 
-                let reference = lastUpdate ?? connectedAt
-                let quiet = silence.shouldPollQuietly(now: Date(), reference: reference)
+                let quiet = silence.shouldPollQuietly(
+                    now: Date(), reference: silenceReference)
 
                 if quiet {
                     await quietCycle(using: elm, generation: generation)
@@ -1448,12 +1634,15 @@ final class LiveModel {
                     // cannot be answered.
                     try? await Task.sleep(
                         nanoseconds: UInt64(silence.quietInterval * 1_000_000_000))
-                } else if let last = lastUpdate, Date().timeIntervalSince(last) > 5 {
+                } else if let last = lastVehicleAnswerAt, Date().timeIntervalSince(last) > 5 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
 
                 if let connectedAt,
-                   watchdog.shouldDisconnect(now: Date(), lastActivity: lastUpdate, connectedAt: connectedAt) {
+                   watchdog.shouldDisconnect(
+                       now: Date(),
+                       lastActivity: lastVehicleAnswerAt,
+                       connectedAt: connectedAt) {
                     disconnect(reason: .idleTimeout)
                     return
                 }
@@ -1464,21 +1653,35 @@ final class LiveModel {
 
     /// One full pass: every live signal, then the periodic extra work.
     private func sampleCycle(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
-        // Manufacturer and DTC work address modules directly; restore
-        // broadcast before sampling so live values keep their meaning.
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        // Address the engine module rather than taking the first frame from a
+        // broadcast: the TCM answers the same request on this car and its speed
+        // or bitmap would otherwise be attributed to the engine.
+        await selectEngineHeader(using: elm)
 
+        // Keep this cycle's observations together. The battery monitor must not
+        // combine a fresh voltage with an RPM cached from an earlier cycle, or a
+        // crank where one read timed out is graded from stale data.
+        var batteryCycle = BatteryCycle()
         for signal in signals {
             guard isCurrent(generation) else { return }
-            await sample(signal, using: elm, generation: generation)
+            let value = await sample(signal, using: elm, generation: generation)
+            if let pid = signal.pidValue {
+                batteryCycle.record(pid: pid, value: value)
+            }
         }
 
-        // A crank lasts one to two seconds. While the engine is off,
-        // sample voltage a second time per cycle so the dip is caught.
-        if (lastRPM ?? 0) < 400,
+        // A crank lasts one to two seconds. While the engine is off — or when
+        // this cycle's RPM read failed — sample voltage a second time so the dip
+        // is caught.
+        if batteryCycle.rpm.map({ $0 < 400 }) ?? true,
            let voltage = signals.first(where: { $0.pid == "42" }) {
             guard isCurrent(generation) else { return }
-            await sample(voltage, using: elm, generation: generation)
+            let value = await sample(voltage, using: elm, generation: generation)
+            batteryCycle.record(pid: 0x42, value: value)
+        }
+
+        if let sample = batteryCycle.voltageSample {
+            feedBatteryMonitor(volts: sample.volts, rpm: sample.rpm)
         }
 
         if isRecording,
@@ -1544,15 +1747,27 @@ final class LiveModel {
     /// mode would be a one-way door.
     private func quietCycle(using elm: ELMClient, generation: ConnectionEpoch.Token) async {
         // The sweep may have left a module header selected.
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await selectEngineHeader(using: elm)
 
         if let reply = try? await elm.send("ATRV", timeout: 2) {
             guard isCurrent(generation) else { return }
             supplyVolts = reply.supplyVolts
         }
 
-        guard let rpm = signals.first(where: { $0.pid == "0C" }) else { return }
-        await sample(rpm, using: elm, generation: generation)
+        // Engine speed is the best wake probe, but a profile without it (or an
+        // authoritative bitmap that omitted it) must still ask the ECU
+        // something. Returning here made quiet mode a one-way door.
+        if let probe = QuietProbe.choose(from: signals) {
+            await sample(probe, using: elm, generation: generation)
+            return
+        }
+
+        let reply = try? await elm.send("0100", timeout: 2)
+        guard isCurrent(generation) else { return }
+        guard let hex = reply?.payloadHex, hex.hasPrefix("4100") else { return }
+        // The car answered even though no numeric signal is available. This is
+        // a genuine resumption, not a link drop.
+        noteSample()
     }
 
     /// One live signal. A failed read writes nothing: absence is meaningful.
@@ -1564,35 +1779,40 @@ final class LiveModel {
         reportGapTransition(gapMonitor.update(now: date, lastSampleAt: date))
     }
 
+    @discardableResult
     private func sample(
         _ signal: VehicleProfile.StandardSignal,
         using elm: ELMClient,
         generation: ConnectionEpoch.Token
-    ) async {
-        guard let pid = signal.pidValue else { return }
+    ) async -> Double? {
+        guard let pid = signal.pidValue else { return nil }
         let command = String(format: "01%02X", pid)
         guard let reply = try? await elm.send(command, timeout: 2),
               let hex = reply.payloadHex,
               hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4))),
               let value = signal.decode(data)
-        else { return }
-        guard isCurrent(generation) else { return }
+        else { return nil }
+        guard isCurrent(generation) else { return nil }
 
         let sampleTime = Date()
         readings.setStandard(pid: signal.pid, value: value, at: sampleTime)
         noteSample(at: sampleTime)
 
-        // The ECU may have been asleep when we probed. Now that it is answering,
-        // ask again so an unnecessary empty capability set is not recorded.
-        if discovery == .failed, !discoveryRetryDone {
-            discoveryRetryDone = true
-            await discoverCapabilities(using: elm)
-            guard isCurrent(generation) else { return }
-            rebuildSignalList()
-        }
+        // These caches are used for control flow, not as battery evidence.
+        // Battery classification receives this cycle's values explicitly.
+        if pid == 0x0C { lastRPM = value }
 
-        feedBatteryMonitor(pid: pid, value: value)
+        // The ECU may have been asleep when we probed. Now that it is answering,
+        // ask again so an unnecessary empty capability set is not recorded —
+        // including a pass that lost a bitmap to the wake.
+        if discoveryResult.needsRetry, !discoveryRetryDone {
+            discoveryRetryDone = true
+            await discoverCapabilities(using: elm, into: discoveryResult, generation: generation)
+            guard isCurrent(generation) else { return nil }
+            rebuildSignalList()
+            persistDiscoveryIfRecording()
+        }
 
         if isRecording {
             let written = session.sample(
@@ -1604,6 +1824,7 @@ final class LiveModel {
             )
             if !written { syncRecordingState() }
         }
+        return value
     }
 
     // MARK: - DTC scanning
@@ -1646,7 +1867,7 @@ final class LiveModel {
         }
     }
 
-    private func completeScan(_ diagnostics: VehicleDiagnostics, outcomes: [String: String]) {
+    func completeScan(_ diagnostics: VehicleDiagnostics, outcomes: [String: String]) {
         self.diagnostics = diagnostics
         self.diagnosticsAt = Date()
 
@@ -1680,13 +1901,14 @@ final class LiveModel {
         guard let profile, !profile.priorityLIDs.isEmpty else { return }
         for lid in profile.priorityLIDs {
             guard isCurrent(generation) else { return }
-            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            await selectManufacturerHeader(using: elm)
             guard isCurrent(generation) else { return }
             let command = String(format: "21%02X", lid)
             let reply = try? await elm.send(command, timeout: 3)
             guard isCurrent(generation) else { return }
             guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { continue }
 
+            manufacturerServiceAvailable = true
             let decodedValues = profile.decode(frame)
             let sampleTime = Date()
             for decoded in decodedValues {
@@ -1728,7 +1950,7 @@ final class LiveModel {
         defer { if !reachedOutcome { sweep.abandon() } }
 
         guard isCurrent(generation) else { return }
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        await selectManufacturerHeader(using: elm)
         guard isCurrent(generation) else { return }
 
         let command = String(format: "21%02X", step.lid)
@@ -1752,6 +1974,11 @@ final class LiveModel {
 
         guard let frame, let hex else { return }
 
+        // A parsed `0x21` frame is proof the manufacturer service works, which
+        // one connect-time probe is not: the probe can lose the race with a
+        // waking ECU, and a manifest written from it alone can claim the
+        // service never answered while the samples above say otherwise.
+        manufacturerServiceAvailable = true
         let decodedValues = profile.decode(frame)
         let sampleTime = Date()
 
@@ -1786,12 +2013,13 @@ final class LiveModel {
 
         for lid in profile.tripSnapshotLIDs {
             guard isCurrent(generation) else { return }
-            _ = try? await elm.send("ATSH7E0", timeout: 2)
+            await selectManufacturerHeader(using: elm)
             guard isCurrent(generation) else { return }
             guard let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 3),
                   let hex = reply.payloadHex,
                   let frame = MUT21Frame(hex: hex)
             else { continue }
+            manufacturerServiceAvailable = true
             for value in profile.decode(frame) {
                 let key = value.name
                     .lowercased()
@@ -1800,7 +2028,7 @@ final class LiveModel {
                 details[String(format: "%02X.%@", lid, key)] = String(format: "%.2f", value.value)
             }
         }
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
         guard isCurrent(generation) else { return }
 
         if let odometerKm { details["odometerKm"] = String(odometerKm) }
@@ -1833,12 +2061,14 @@ final class LiveModel {
               let lid = role.lidValue
         else { return nil }
         guard !Task.isCancelled else { return nil }
-        _ = try? await elm.send("ATSH7E0", timeout: 2)
+        await selectManufacturerHeader(using: elm)
         guard !Task.isCancelled else { return nil }
         let reply = try? await elm.send(String(format: "21%02X", lid), timeout: 2)
         guard !Task.isCancelled else { return nil }
-        _ = try? await elm.send("ATSH7DF", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
         guard let hex = reply?.payloadHex, let frame = MUT21Frame(hex: hex) else { return nil }
+        // The service answered, whatever the connect-time probe concluded.
+        manufacturerServiceAvailable = true
         return role.value(in: profile.decode(frame)).map(Int.init)
     }
 
@@ -1856,8 +2086,10 @@ final class LiveModel {
     /// Intake air temperature with the engine off, as an ambient proxy: this ECU
     /// has no ambient-temperature PID.
     private func readAmbient(using elm: ELMClient) async -> Double? {
-        guard let reply = try? await elm.send("010F", timeout: 2),
-              let hex = reply.payloadHex, hex.hasPrefix("410F"),
+        await selectEngineHeader(using: elm)
+        let reply = try? await elm.send("010F", timeout: 2)
+        await restoreBroadcastHeader(using: elm)
+        guard let hex = reply?.payloadHex, hex.hasPrefix("410F"),
               let bytes = LiveModel.bytes(String(hex.dropFirst(4))),
               let first = bytes.first
         else { return nil }
