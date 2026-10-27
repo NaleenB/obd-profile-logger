@@ -160,13 +160,17 @@ macOS builds have no expiry. iOS uses free provisioning: a 7-day profile, and
 re-running from Xcode is an **upgrade** that preserves the app container.
 Deleting the app destroys every recorded session.
 
-Pulling sessions off the phone without the share sheet:
+Pulling sessions off the phone without the share sheet goes through
+`tools/pull-ios-sessions.sh`, which archives them under `sessions/` (gitignored):
 
 ```bash
-xcrun devicectl device copy from --device <udid> \
-  --domain-type appDataContainer --domain-identifier com.naleen.obdlogger \
-  --source "Library/Application Support/OBDLogger/Sessions" --destination /tmp/sessions
+./tools/pull-ios-sessions.sh [<udid>]
 ```
+
+Every read of the device log is archived there first; a `/tmp` copy is only a
+fallback when the device is unreachable. The archive merges rather than
+replaces, because NDJSON is append-only: a later pull completes an interrupted
+session, and a session deleted from the phone stays in the archive.
 
 ## Known traps
 
@@ -288,9 +292,11 @@ Each of these has already caused a wrong conclusion.
 - **Standard OBD is addressed to the engine, not read from the first broadcast
   frame.** Both `7E8` and `7E9` answer `7DF`; `payloadHex` takes the first, so a
   TCM reply could become vehicle speed, rpm or the capability bitmap. The
-  profile's `engineRequestHeader` (or `7E0` for CAN) is selected for mode `01`,
-  identity, ambient and discovery. Do not enable `ATH1` to solve this: it latches
-  this clone's receive filter.
+  profile's `engineRequestHeader` (or `7E0` on 11-bit CAN) is selected for mode
+  `01`, identity, ambient and discovery. The 11-bit `7E0` must not be sent on
+  29-bit CAN or a non-CAN bus; a 29-bit profile has to name its own engine
+  header. Do not enable `ATH1` to solve this: it latches this clone's receive
+  filter.
 - **Battery inputs belong to one polling cycle.** A fresh voltage beside a cached
   RPM hides a crank; a fresh RPM beside a cached voltage records a crank minimum
   from seconds earlier. `BatteryCycle` carries `nil` for a failed read, and the

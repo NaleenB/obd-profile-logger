@@ -9,3 +9,5 @@ DerivedData/
 App/*.xcodeproj/
 App/Info-*.plist
 App/build/
+sessions/*
+!sessions/README.md
