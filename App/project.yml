@@ -54,6 +54,22 @@ targets:
         ENABLE_HARDENED_RUNTIME: NO
         COMBINE_HIDPI_IMAGES: YES
 
+  OBDLogger-macOS-Tests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: OBDLogger-macOS
+      - package: OBDCore
+        product: OBDCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.naleen.obdlogger.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+
   OBDLogger-iOS:
     type: application
     platform: iOS

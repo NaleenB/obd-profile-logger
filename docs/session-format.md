@@ -42,8 +42,8 @@ changes, and rewritten at stop with `finishedAt` and counts.
 | `appVersion` | build that wrote the session |
 | `vehicleProfileID` | profile in effect when the session ended; `generic-iso15765-can` when none matched |
 | `adapterName`, `adapterIdentifier` | BLE identity, when known |
-| `supportedPIDs` | full capability set discovered during the session; null when discovery never succeeded |
-| `capabilityDiscovery` | `succeeded` or `failed` — written at stop, so a cold start that resolved once the ECU woke records `succeeded` |
+| `supportedPIDs` | the capability set reached by the answering bitmaps; null when discovery never succeeded. A partial pass does not cover the whole car; `unansweredPIDBases` says which range was left unknown |
+| `capabilityDiscovery` | `succeeded` or `failed` — rewritten when a discovery retry changes the result, so a cold start that resolved once the ECU woke records `succeeded` even if the recording is interrupted |
 | `unansweredPIDBases` | bitmaps (e.g. `["20"]`) the ECU declared but never answered, present only when discovery was incomplete. `supportedPIDs` then covers only the part of the car the answering bitmaps reached, and the unanswered range was polled without being checked |
 | `profileMatch` | `calibration`, `vin`, `agreement`, `none`, or `override` (development only) — written at stop |
 | `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |

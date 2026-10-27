@@ -64,6 +64,11 @@ the frames are simply concatenated in the response:
 Keep frames separate and pick the intended module. With headers on, the CAN ID
 prefix identifies the responder (`7E8` = engine, `7E9` = transmission).
 
+The app addresses standard mode `01`, identity and capability requests to the
+engine header (`7E0`, or the profile's named ECM module) so `payloadHex` cannot
+silently become the transmission's reply. Non-CAN protocols keep broadcast
+`7DF`; `7E0` is a CAN header and is not valid there.
+
 ## Services
 
 | Service | Purpose | Notes |

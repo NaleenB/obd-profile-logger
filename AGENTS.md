@@ -140,16 +140,17 @@ cd Link && swift test            # ELM327 response parser tests
 cd Probe && swift test           # Probe safety tests, no car needed
 cd Probe && ./run.sh --self-test # parser checks; exits non-zero on failure
 cd App && ./run.sh               # build and launch the macOS app
+cd App && xcodebuild test -project OBDLogger.xcodeproj -scheme OBDLogger-macOS \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO  # coordinator state tests
 ./tools/deploy-ios.sh            # bump version, build, install to iPhone
 cd App && xcodegen generate      # after editing project.yml
 ```
 
 CI (`.github/workflows/ci.yml`) runs Core, Link and Probe tests, the Probe
-self-test and both app builds on macOS for every push and pull request. It needs
-no adapter, so a regression in parsing, decoding, profile validation or packaging
-is caught before hardware. The App coordinator itself still has no automated
-target; connection-generation logic is covered in Core and must be exercised on
-hardware.
+self-test, the macOS app coordinator tests and both app builds for every push and
+pull request. It needs no adapter, so a regression in parsing, decoding, profile
+validation, session-boundary state or packaging is caught before hardware.
+Connection-generation ownership still has to be exercised on hardware.
 
 `deploy-ios.sh` increments the patch version before building, so the version on
 screen always matches the installed build. The build number (`CFBundleVersion`) is
@@ -278,6 +279,31 @@ Each of these has already caused a wrong conclusion.
   not evidence about a service. `2111` timed out while the ECU woke, and the
   manifest claimed `0x21` never answered while 2136 manufacturer samples sat
   below it.
+- **A manual connect starts a new vehicle session; an in-session reconnect does
+  not.** `connect()` resets to the generic profile and clears the previous car's
+  match, diagnostics and odometer state. Reusing a resolved profile was
+  decoding a different car with the Outlander's offsets and stamping
+  `profileMatch: calibration` without reading a calibration ID. `beginReconnect`
+  deliberately preserves the profile because it is still the same car.
+- **Standard OBD is addressed to the engine, not read from the first broadcast
+  frame.** Both `7E8` and `7E9` answer `7DF`; `payloadHex` takes the first, so a
+  TCM reply could become vehicle speed, rpm or the capability bitmap. The
+  profile's `engineRequestHeader` (or `7E0` for CAN) is selected for mode `01`,
+  identity, ambient and discovery. Do not enable `ATH1` to solve this: it latches
+  this clone's receive filter.
+- **Battery inputs belong to one polling cycle.** A fresh voltage beside a cached
+  RPM hides a crank; a fresh RPM beside a cached voltage records a crank minimum
+  from seconds earlier. `BatteryCycle` carries `nil` for a failed read, and the
+  monitor is fed once per cycle. A link drop does not reset `batteryLogged`:
+  Bluetooth dropping is not the engine stopping.
+- **Discovery improvements are persisted immediately.** A cold-start retry can
+  turn a failed/partial pass into a complete one mid-session. Writing that only
+  at stop leaves an interrupted manifest claiming the car had fewer PIDs than
+  its samples used.
+- **A peripheral UUID is not a connection identity.** Reconnecting to the same
+  adapter reuses the same `CBPeripheral`; the old `didDisconnect` can arrive
+  after the replacement is installed and tear it down. `BLETransport` waits for
+  the previous teardown callback before reusing the UUID.
 
 ## Status — what is proven
 
