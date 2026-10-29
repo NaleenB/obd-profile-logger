@@ -49,7 +49,7 @@ changes, and rewritten at stop with `finishedAt` and counts.
 | `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
 | `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval. The start value is written as soon as it is read, which is usually after recording starts because service `0x21` only answers once the car is identified |
-| `ambientTempC` | intake air temperature before the engine started, used as an ambient proxy |
+| `ambientTempC` | intake air temperature, used as an ambient proxy. This ECU has no `0x46`, and intake air only describes ambient while the engine is not running, so the value is omitted at or above `BatteryMonitor.runningRpm` (400) and when engine speed could not be read |
 | `coldSoakHours` | hours since the previous session ended, when known |
 | `notes` | free-form, including what the recording did **not** cover |
 
@@ -118,8 +118,9 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 `startup_timing` records where connection time went. It exists because "the
 phone connects slowly" is otherwise unfalsifiable.
 
-Every field is a **stage duration**, so no subtraction is needed to find the slow
-one; only `totalMs` is cumulative.
+Every **timing** field is a stage duration, so no subtraction is needed to find
+the slow one; only `totalMs` is cumulative. The `protocol*` and `requestHeader`
+fields are not timings — see below.
 
 | Field | Stage |
 |---|---|
@@ -132,10 +133,25 @@ one; only `totalMs` is cumulative.
 | `probeTotalMs` | that probe in total |
 | `capabilityDiscoveryMs` | asking which standard PIDs are supported |
 | `totalMs` | connection start to recording started |
+| `protocolRequested` | the pin taken from the profile (`6`), or `auto` when it has none |
+| `protocolAccepted` | whether the car answered `0100` on that pin; `not_requested` when nothing was pinned |
+| `protocolFallback` | `ATSP0` when the pin was rejected, otherwise `none` |
+| `protocolDetected` | `ATDPN` as the adapter reported it, e.g. `A6`, `A0` or `6` |
+| `requestHeader` | the module header mode `01` and `0x21` were addressed to, e.g. `7E0` or `7DF` |
 
 Two header commands costing seconds rather than milliseconds is the signature of
 an adapter still busy with an earlier reply, which is a different problem from a
 slow car and is invisible in a single total.
+
+The bus fields exist because a header mistake and a refusing car produce the same
+file. A rejected protocol pin falls back to `ATSP0`, and `ATDPN` read immediately
+after can report a protocol auto-detection has not reached yet; a non-CAN answer
+resolves the header to `7DF`. Mode `01` still answers on broadcast, so the session
+looks healthy while `0x21` — addressed to the ECM — never replies. The connect-time
+reading is provisional: the app asks `ATDPN` again after the first successful
+sample, so `profile_changed` carries the header that is actually in force.
+`requestHeader` is also written on `adapter_reconnected`, because a reconnect can
+change it mid-session.
 
 A second `startup_timing` event with `phase: first_sample` records
 `sinceConnectMs`: connection start to the first successful observation. It uses
@@ -144,10 +160,12 @@ manufacturer reads cannot inflate it. That is the number a driver feels.
 
 `profile_changed` marks the boundary where a vehicle profile was applied. The app
 starts on generic OBD and may identify the car while recording, once the ECU wakes
-or the engine runs. It carries `from`, `to`, `method` and `reason`. No manufacturer
-sample is written before that event, so the archived `profile.json` describes every
-one of them; samples are self-describing (`name`, `unit`, `value`, `raw`) either
-way.
+or the engine runs. It carries `from`, `to`, `method` and `reason`, plus
+`protocolDetected` and `requestHeader` for the connection the new profile will use
+— the profile can name a different ECM header, so the header in force at connect is
+not necessarily the one in force afterwards. No manufacturer sample is written
+before that event, so the archived `profile.json` describes every one of them;
+samples are self-describing (`name`, `unit`, `value`, `raw`) either way.
 
 `sweep_completed` closes a cycle only after the final identifier's request has
 reached a terminal outcome — a parseable reply or a timeout. An attempt is
@@ -217,7 +235,9 @@ crosses the ten-second threshold while reconnecting, `data_gap` is emitted. Only
 a genuine sample after reconnection produces `data_resumed`. Reconnection uses
 the same remembered-adapter-first, rescan-on-failure path as the first connection
 (`adapter_rescanned` in `adapter_reconnected`), so a peripheral that has gone
-stale cannot block recovery. On success it writes `adapter_reconnected` and
+stale cannot block recovery. The event also carries `protocolDetected` and
+`requestHeader`, because the reconnect re-reads `ATDPN` and re-derives the header
+for the profile it is resuming. On success it writes `adapter_reconnected` and
 continues the same session, so a walk out of range and back produces one file
 rather than two. If the ten minutes expire, a still-open gap ends with
 `reason: link_down` and the session is stopped with reason `reconnect_timeout`.

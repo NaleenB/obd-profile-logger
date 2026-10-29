@@ -41,6 +41,11 @@ with a retry window of at least a minute before concluding the adapter is absent
 - `AT@1` returns `ICSolution` on clones; `ATI` returns `ELM327 v1.5`. The version
   string is unreliable — v1.5 clones are the most common.
 - `ATDPN` may return `6` without the usual `A` (auto-detected) prefix.
+- `ATDPN` describes the protocol **in use**, so read it after a request has
+  succeeded. Straight after `ATSP0` it can still report the not-yet-detected
+  state; deriving an 11-bit CAN header from that answer yields `7DF`, which
+  answers mode `01` by broadcast but silently drops physically addressed
+  manufacturer `21` requests.
 - Responses are prompt-terminated with `>`. **Accumulate bytes until `>`**; never
   assume one notification equals one response.
 - Multi-frame replies arrive as a length line (`014`) followed by `0:`, `1:` …

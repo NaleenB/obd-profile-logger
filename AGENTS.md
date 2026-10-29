@@ -190,6 +190,12 @@ Each of these has already caused a wrong conclusion.
   threshold was cleared from a 2 Hz capture.
 - **Ignition-on voltage is not a resting measurement** (glow plugs plus ECU load).
   The battery check compares it against 11.8 V, not the 12.2 V resting band.
+- **Intake air is not ambient once the engine runs.** This ECU has no `0x46`, so
+  `010F` stands in as the ambient proxy, but a hot intake heat-soaks: session
+  `20261029-170013` recorded 61 °C on a 2 h soak while the engine idled, against
+  45 °C from the profile's own air-temperature parameter. `AmbientProxy` drops
+  the value at or above 400 rpm, so a warm-start session honestly records no
+  `ambientTempC` instead of a manifold temperature.
 - **Raw `230` is a sentinel, not 950 °C.** It appears on the NTC input this car
   does not have and on the stored-maximum fields, while live temperatures read
   normally and regen peaks sit at 620–720 °C. Those parameters declare
@@ -202,10 +208,20 @@ Each of these has already caused a wrong conclusion.
   read and trip snapshot ran before polling. They now wait for the first
   successful sample. If startup is slow again, check `startup_timing` events
   before guessing: a slow scan and a slow ECU look identical without them. Every
-  field there is a stage duration except `totalMs`; the manufacturer probe is
-  split by command because two header commands costing seconds means a busy
+  timing field there is a stage duration except `totalMs`; the manufacturer probe
+  is split by command because two header commands costing seconds means a busy
   adapter, not a slow car. `first_sample` must use the first successful
-  observation's timestamp, not `lastUpdate` after enrichment.
+  observation's timestamp, not `lastUpdate` after enrichment. The same event
+  records the bus decision — `protocolRequested`, `protocolAccepted`,
+  `protocolFallback`, `protocolDetected`, `requestHeader` — because a rejected
+  protocol pin can leave the header on `7DF`, where mode `01` still answers by
+  broadcast and `0x21` never replies. A silent ECM and a request that never
+  reached it look identical in `samples.ndjson`; check the header before blaming
+  the car. `ATDPN` before the car has answered is provisional (`A0` is the auto
+  state, not a bus), so the app re-reads it after the first successful sample
+  and `profile_changed` carries the corrected header. Session `20261029-150006`
+  is the evidence: `protocolFallback: ATSP0`, `protocolDetected: A0`,
+  `requestHeader: 7DF`, zero `0x21` samples, every other service working.
 - **One battery report per engine cycle, not per connection.** The monitor resets
   after the engine has been stopped for five seconds, so a restart in the same
   connection is measured again.

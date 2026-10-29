@@ -234,6 +234,7 @@ final class LiveModel {
         battery.reset()
         protocolDescription = ""
         detectedProtocolNumber = nil
+        protocolDetectionIsProvisional = false
         readings.clear()
         dpf = nil
         rebuildSignalList()
@@ -444,11 +445,15 @@ final class LiveModel {
         rebuildSignalList()
 
         if isRecording {
+            // The header can change with the profile, and it is what decides
+            // whether `0x21` is addressed to the ECM or lost on broadcast.
             session.event(.profileChanged, [
                 "from": previous,
                 "to": id,
                 "method": resolution.method.rawValue,
-                "reason": resolution.reason
+                "reason": resolution.reason,
+                "protocolDetected": detectedProtocolNumber ?? "",
+                "requestHeader": standardHeader
             ])
             let data = profileURL.flatMap { try? Data(contentsOf: $0) }
             if let data {
@@ -477,6 +482,13 @@ final class LiveModel {
         await selectEngineHeader(using: elm)
         let reply = try? await elm.send(String(format: "01%02X", pid), timeout: 2)
         await restoreBroadcastHeader(using: elm)
+        return decodeStandard(pid, from: reply)
+    }
+
+    /// Decodes a mode `01` reply with the profile's own signal, so no scaling is
+    /// hardcoded. Separate from `readStandard` because a caller that has already
+    /// selected the engine header should not pay for a second header round trip.
+    private func decodeStandard(_ pid: UInt8, from reply: ELMResponse?) -> Double? {
         guard let hex = reply?.payloadHex,
               hex.hasPrefix(String(format: "41%02X", pid)),
               let data = LiveModel.bytes(String(hex.dropFirst(4)))
@@ -708,6 +720,35 @@ final class LiveModel {
         connectionEpoch.isValid(generation) && !Task.isCancelled
     }
 
+    /// What the connect sequence decided about the bus and the module header,
+    /// recorded so a silent service can be diagnosed from the session file.
+    ///
+    /// A rejected protocol pin falls back to `ATSP0`, and `ATDPN` read at that
+    /// moment can still report a protocol auto-detection has not reached yet.
+    /// The header is derived from that value, so a non-CAN answer resolves it to
+    /// broadcast: mode `01` keeps working while `0x21`, which is physically
+    /// addressed to the ECM, goes quiet. Without these fields the log cannot
+    /// tell that apart from an ECU that simply did not answer.
+    struct ProtocolDiagnostics: Equatable {
+        var requested: String?
+        var accepted: Bool
+        var fellBackToAuto: Bool
+        var detected: String?
+        var header: String
+
+        var details: [String: String] {
+            [
+                "protocolRequested": requested ?? "auto",
+                "protocolAccepted": requested == nil
+                    ? "not_requested"
+                    : (accepted ? "true" : "false"),
+                "protocolFallback": fellBackToAuto ? "ATSP0" : "none",
+                "protocolDetected": detected ?? "",
+                "requestHeader": header
+            ]
+        }
+    }
+
     func connect() {
         guard phase != .connected, phase != .connecting else { return }
         cancelReconnect()
@@ -755,18 +796,26 @@ final class LiveModel {
                 _ = try? await client.send("ATH0", timeout: 2)
                 // Prefer the profile's protocol, but never trust it blindly: a
                 // wrong pin means no data at all, so fall back to auto-detect.
+                let requestedProtocol = profile?.elmProtocol
                 var protocolAccepted = false
-                if let protocolValue = profile?.elmProtocol {
+                var fellBackToAuto = false
+                if let protocolValue = requestedProtocol {
                     _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
                     protocolAccepted = await ECUResponds(using: client)
                     if !protocolAccepted {
                         _ = try? await client.send("ATSP0", timeout: 3)
+                        fellBackToAuto = true
                     }
                 } else {
                     _ = try? await client.send("ATSP0", timeout: 3)
                 }
                 let elmMs = Date().timeIntervalSince(elmBegan) * 1000
 
+                // Read now for the log, but only trust it when the pin was
+                // accepted: after an `ATSP0` fallback the adapter reports the
+                // state of auto-detection until a request has been answered,
+                // and a header must not be derived from that.
+                protocolDetectionIsProvisional = !protocolAccepted
                 if let reply = try? await client.send("ATDPN", timeout: 2) {
                     let number = reply.statusSummary
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -803,7 +852,6 @@ final class LiveModel {
                 if let protocolName = try? await client.send("ATDP", timeout: 2) {
                     protocolDescription = protocolName.statusSummary
                 }
-                _ = protocolAccepted
 
                 // Only what the manifest needs before recording. The initial DPF
                 // read and trip snapshot wait for the first successful sample:
@@ -820,9 +868,18 @@ final class LiveModel {
                 // Recording is automatic: connecting is the intent to record.
                 startRecording()
                 session.event(.adapterConnected, ["adapter": adapterName])
-                // Every field here is a stage duration, so a reader never has to
-                // subtract milestones to find the slow one. `totalMs` is the
-                // exception, and says so by name.
+                // Every time field here is a stage duration, so a reader never
+                // has to subtract milestones to find the slow one. `totalMs` is
+                // the exception, and says so by name. The bus fields are not
+                // timings: they record which protocol and header the session
+                // actually used, because a wrong header looks exactly like a
+                // car that refused a service.
+                let bus = ProtocolDiagnostics(
+                    requested: requestedProtocol,
+                    accepted: protocolAccepted,
+                    fellBackToAuto: fellBackToAuto,
+                    detected: detectedProtocolNumber,
+                    header: standardHeader)
                 session.event(.startupTiming, [
                     "phase": "connected",
                     "startMs": Self.millis(startMs),
@@ -832,7 +889,9 @@ final class LiveModel {
                     "elmInitMs": Self.millis(elmMs),
                     "capabilityDiscoveryMs": Self.millis(capabilityDiscoveryMs),
                     "totalMs": Self.millis(Date().timeIntervalSince(started) * 1000)
-                ].merging(manufacturerProbeTimings) { current, _ in current })
+                ]
+                .merging(manufacturerProbeTimings) { current, _ in current }
+                .merging(bus.details) { current, _ in current })
                 startPolling(generation: generation)
             } catch {
                 guard self.isCurrent(generation) else { return }
@@ -1032,9 +1091,14 @@ final class LiveModel {
                     _ = try? await client.send("ATE0", timeout: 2)
                     _ = try? await client.send("ATS0", timeout: 2)
                     _ = try? await client.send("ATH0", timeout: 2)
-                    if let protocolValue = self.profile?.elmProtocol {
+                    let pinnedProtocol = self.profile?.elmProtocol
+                    if let protocolValue = pinnedProtocol {
                         _ = try? await client.send("ATSP\(protocolValue)", timeout: 2)
                     }
+                    // A pin makes the number authoritative even before a reply;
+                    // without one the adapter is still on auto, and the reading
+                    // is only good once the car has answered again.
+                    self.protocolDetectionIsProvisional = pinnedProtocol == nil
                     if let reply = try? await client.send("ATDPN", timeout: 2) {
                         let number = reply.statusSummary
                             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1050,12 +1114,17 @@ final class LiveModel {
                     // run on the replacement connection.
                     self.discoveryRetryDone = false
                     self.status = "Connected"
+                    // A reconnect re-reads `ATDPN` on the replacement link,
+                    // which can change the header for the same profile. Record
+                    // the value the rest of the session will use.
                     self.session.event(.adapterReconnected, [
                         "attempt": String(attempt),
                         "adapter": candidate.name,
                         "adapterDiscoveryMs": Self.millis(link.discoveryMs),
                         "adapterConnectMs": Self.millis(link.connectMs),
-                        "adapterRescanned": link.rescanned ? "true" : "false"
+                        "adapterRescanned": link.rescanned ? "true" : "false",
+                        "protocolDetected": self.detectedProtocolNumber ?? "",
+                        "requestHeader": self.standardHeader
                     ])
                     self.startPolling(generation: generation)
                     return
@@ -1352,6 +1421,13 @@ final class LiveModel {
     /// `ATDPN` as reported by the adapter, used to choose a valid module header.
     private var detectedProtocolNumber: String?
 
+    /// `ATDPN` answers before the car has answered a request with the state of
+    /// auto-detection (`A0`), not with the bus. Deriving a header from that puts
+    /// the session on broadcast: mode `01` still works, `0x21` — which is
+    /// physically addressed to the ECM — never does. This flag means "the
+    /// reading is not evidence yet, ask again once a request has been answered".
+    private var protocolDetectionIsProvisional = false
+
     private var protocolIdentifier: String? {
         detectedProtocolNumber ?? profile?.transport?.elmProtocol
     }
@@ -1388,6 +1464,22 @@ final class LiveModel {
 
     private func restoreBroadcastHeader(using elm: ELMClient) async {
         _ = try? await elm.send("ATSH7DF", timeout: 2)
+    }
+
+    /// Re-reads `ATDPN` once the car has answered a request, which is the first
+    /// moment the adapter reports the bus rather than the state of
+    /// auto-detection. Without this a rejected pin leaves the session on `7DF`
+    /// for its whole life: mode `01` keeps answering by broadcast, so nothing
+    /// looks wrong until service `0x21` silently produces no samples.
+    private func refreshDetectedProtocol(using elm: ELMClient) async {
+        guard let reply = try? await elm.send("ATDPN", timeout: 2) else { return }
+        let number = reply.statusSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !number.isEmpty else { return }
+        detectedProtocolNumber = number
+        protocolDetectionIsProvisional = false
+        // The header is derived from what was just read, and the adapter is
+        // holding the old one; reselect so the rest of this cycle matches.
+        await selectEngineHeader(using: elm)
     }
 
     /// True when the ECU answers a basic request, used to validate a pinned
@@ -1799,6 +1891,14 @@ final class LiveModel {
         readings.setStandard(pid: signal.pid, value: value, at: sampleTime)
         noteSample(at: sampleTime)
 
+        // The car has answered, so `ATDPN` now reports the bus rather than the
+        // state of auto-detection. Ask before the manufacturer steps in this
+        // same cycle choose a header from the provisional value.
+        if protocolDetectionIsProvisional {
+            await refreshDetectedProtocol(using: elm)
+            guard isCurrent(generation) else { return nil }
+        }
+
         // These caches are used for control flow, not as battery evidence.
         // Battery classification receives this cycle's values explicitly.
         if pid == 0x0C { lastRPM = value }
@@ -2085,15 +2185,19 @@ final class LiveModel {
 
     /// Intake air temperature with the engine off, as an ambient proxy: this ECU
     /// has no ambient-temperature PID.
+    ///
+    /// Engine speed is read in the same header window, because the proxy is only
+    /// ambient while the engine is not running. Accepting `010F` regardless
+    /// recorded 61 °C from a heat-soaked intake on a session that started with
+    /// the engine already idling.
     private func readAmbient(using elm: ELMClient) async -> Double? {
         await selectEngineHeader(using: elm)
-        let reply = try? await elm.send("010F", timeout: 2)
+        let air = try? await elm.send("010F", timeout: 2)
+        let revs = try? await elm.send("010C", timeout: 2)
         await restoreBroadcastHeader(using: elm)
-        guard let hex = reply?.payloadHex, hex.hasPrefix("410F"),
-              let bytes = LiveModel.bytes(String(hex.dropFirst(4))),
-              let first = bytes.first
-        else { return nil }
-        return Double(first) - 40
+        return AmbientProxy.value(
+            intakeAirC: decodeStandard(0x0F, from: air),
+            rpm: decodeStandard(0x0C, from: revs))
     }
 
     /// Rebuilds the DPF summary from profile-decoded live values.
