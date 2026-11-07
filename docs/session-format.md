@@ -113,7 +113,8 @@ Types: `session_started`, `session_stopped`, `adapter_connected`,
 `battery_test`, `data_gap`, `data_resumed`, `data_gap_ended`,
 `regen_started`, `regen_ended`,
 `sweep_completed`, `trip_snapshot`, `dtc_snapshot`, `profile_changed`,
-`profile_disagreement`, `startup_timing`, `app_lifecycle`, `error`.
+`protocol_corrected`, `profile_disagreement`, `startup_timing`, `app_lifecycle`,
+`error`.
 
 `startup_timing` records where connection time went. It exists because "the
 phone connects slowly" is otherwise unfalsifiable.
@@ -149,9 +150,12 @@ after can report a protocol auto-detection has not reached yet; a non-CAN answer
 resolves the header to `7DF`. Mode `01` still answers on broadcast, so the session
 looks healthy while `0x21` — addressed to the ECM — never replies. The connect-time
 reading is provisional: the app asks `ATDPN` again after the first successful
-sample, so `profile_changed` carries the header that is actually in force.
-`requestHeader` is also written on `adapter_reconnected`, because a reconnect can
-change it mid-session.
+sample and writes `protocol_corrected` with the header on both sides
+(`from`, `to`, `requestHeaderBefore`, `requestHeader`). It is a separate event
+rather than an edit to `profile_changed` because a profile can resolve before the
+first sample, and `profile_changed` would then name the header the session stops
+using. `requestHeader` is also written on `adapter_reconnected`, because a
+reconnect can change it mid-session.
 
 A second `startup_timing` event with `phase: first_sample` records
 `sinceConnectMs`: connection start to the first successful observation. It uses
@@ -181,10 +185,23 @@ required discriminator (engine speed) did not agree with the ECU's own reading. 
 profile is kept — calibration is authoritative — and the evidence is recorded so a
 wrong byte offset can be found without re-driving the car.
 
+`trip_snapshot` is written at both ends of a session with the same parameter keys, so
+the two events can be compared field by field. `phase: "start"` is read from the
+profile's snapshot identifiers once the first sample has arrived. `phase: "end"` is
+built from the live cache without new I/O, because the link is usually already being
+torn down, so it is marked `source: "cached"` and carries `maxAgeSeconds`, the age of
+its oldest value. Those identifiers are read once per sweep (about 110 s on this
+car), so an end snapshot is never second-fresh, and identifiers outside the
+profile's snapshot list — engine speed, for one — are deliberately absent: the last
+sweep's value describes a moment that may be a minute before the car stopped.
+
 `data_gap` / `data_resumed` bracket a stretch where the vehicle stopped
-answering while recording continued — usually ignition off. The adapter stays
-connected in that case, because OBD pin 16 is permanent battery power and the
-dongle never loses power; only the ECU sleeps.
+answering while recording continued — usually ignition off. The adapter normally
+stays connected in that case, because OBD pin 16 is permanent battery power; only
+the ECU sleeps. That is not guaranteed for every clone: the adapter in session
+`20261104-164839-8C42` dropped BLE 17 s and 45 s after the last answer, in two
+separate stop/start cycles, and the gap stayed open across each reconnection until
+a sample arrived.
 
 `data_resumed` means a sample from the vehicle arrived. `data_gap_ended` means
 the gap closed for any other reason, and carries `reason`: `link_down` (the

@@ -124,8 +124,8 @@ final class BatteryMonitorTests: XCTestCase {
     /// Low charging voltage is an alternator finding, not a battery one.
     func testLowChargingVoltageIsFlagged() {
         let m = BatteryMonitor()
-        // A charging verdict needs a settled window: ten seconds without the bus
-        // reaching 13.5 V is what makes a low reading meaningful.
+        // A charging verdict needs a settled window: thirty seconds without the
+        // bus reaching 13.5 V is what makes a low reading meaningful.
         feed(m, [
             (0, 12.3, 0),
             (500, 10.0, 150),
@@ -134,12 +134,60 @@ final class BatteryMonitorTests: XCTestCase {
             (5000, 12.4, 700),
             (9000, 12.4, 700),
             (13000, 12.3, 700),
-            (16000, 12.4, 700)
+            (16000, 12.4, 700),
+            (22000, 12.4, 700),
+            (28000, 12.3, 700),
+            (34000, 12.4, 700)
         ])
         let r = m.report()
         let charging = r.findings.first { $0.key == "running_voltage" }
         XCTAssertEqual(charging?.severity, .watch)
         XCTAssertTrue(charging?.message.contains("not a battery fault") == true)
+    }
+
+    /// The alternator on this car takes about 18 s to reach charging voltage
+    /// after a start: on 2026-11-05 the bus read 12.08 V at 11 s, 13.5 V at 18 s
+    /// and 14.4 V at 24 s. Grading at 10 s called that a failed alternator.
+    func testSlowChargingRampIsNotGradedAsAFault() {
+        let m = BatteryMonitor()
+        feed(m, [
+            (0, 12.4, 0),
+            (400, 12.3, 0),
+            (800, 10.2, 180),
+            (1400, 11.2, 320),
+            (1800, 12.08, 650),
+            (6000, 12.08, 650),
+            (11000, 12.08, 650)
+        ])
+        XCTAssertFalse(m.chargingSettled, "the ramp is still in progress at 11 s")
+
+        feed(m, [
+            (18000, 13.6, 650),
+            (24000, 14.4, 650),
+            (31000, 14.3, 650)
+        ])
+        let r = m.report()
+        XCTAssertTrue(r.startObserved)
+        XCTAssertEqual(try XCTUnwrap(r.runningVolts), 14.3, accuracy: 0.05)
+        XCTAssertEqual(
+            r.findings.first { $0.key == "running_voltage" }?.severity, .ok,
+            "a ramp that finishes inside the window is not a fault")
+    }
+
+    /// A session that joins an already-running engine cannot grade charging:
+    /// this system floats below 13.5 V for up to a minute with a full battery,
+    /// so "never above 13.5 V" is not evidence of a dead alternator.
+    func testMidDriveConnectIsNotGradedAsAFailedAlternator() {
+        let m = BatteryMonitor()
+        feed(m, [
+            (0, 12.1, 650),
+            (1500, 12.1, 650),
+            (10000, 12.2, 650),
+            (31000, 12.2, 650)
+        ])
+        let charging = m.report().findings.first { $0.key == "running_voltage" }
+        XCTAssertEqual(charging?.severity, .insufficientData)
+        XCTAssertTrue(charging?.message.contains("not graded") == true)
     }
 
     /// Engine never started: report insufficient data rather than a verdict.
@@ -380,12 +428,13 @@ final class BatteryMonitorSmartChargingTests: XCTestCase {
         XCTAssertTrue(charging?.message.contains("smart charging") == true)
     }
 
-    /// Never reaching 13.5 V is still a fault.
+    /// Never reaching 13.5 V is still a fault — when the monitor saw the start,
+    /// so the ramp was its to observe rather than a float it joined.
     func testNeverChargingIsStillFlagged() {
         let monitor = BatteryMonitor()
         let samples: [(Int, Double, Double?)] = [
             (0, 12.2, 0), (1_000, 10.4, 180), (3_000, 12.3, 650),
-            (15_000, 12.35, 650), (25_000, 12.3, 650)
+            (15_000, 12.35, 650), (25_000, 12.3, 650), (35_000, 12.3, 650)
         ]
         for (ms, v, rpm) in samples {
             monitor.ingest(VoltageSample(atMs: ms, volts: v, rpm: rpm))

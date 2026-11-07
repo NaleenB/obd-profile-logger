@@ -5,7 +5,7 @@ boundaries. Keep it concise and update it when behaviour changes. Do not create
 separate status or implementation-plan documents for completed work.
 
 The workspace router is [`../AGENTS.md`](../AGENTS.md). Vehicle-specific facts
-live in [`../OUTLANDER.md`](../OUTLANDER.md). The other references here are:
+live in [`../OUTLANDER.md`](../outlander/OUTLANDER.md). The other references here are:
 
 - [`README.md`](README.md) — what the project is, for someone deciding whether to use it.
 - [`docs/architecture.md`](docs/architecture.md) — layering and provenance rules.
@@ -88,6 +88,11 @@ Do not re-derive these. Full detail in `../OUTLANDER.md` and `docs/protocol-note
   supported but incomplete. Code absence says nothing about the DPF.
 - Charging is **current-sensor controlled**: it reaches ~14 V then floats to
   ~12.6 V when the battery is full. Do not flag that as an alternator fault.
+  It also takes ~18 s to reach 13.5 V after a start, then sits below that for up
+  to a minute at a time, so `BatteryMonitor` grades charging only from an
+  observed start and only after a 30 s window. Ten seconds was shorter than the
+  ramp: session `20261105-124750-3E44` was told to check the alternator at
+  12.08 V, which read 14.4 V ten seconds later.
 
 ## Profile selection
 
@@ -219,7 +224,9 @@ Each of these has already caused a wrong conclusion.
   reached it look identical in `samples.ndjson`; check the header before blaming
   the car. `ATDPN` before the car has answered is provisional (`A0` is the auto
   state, not a bus), so the app re-reads it after the first successful sample
-  and `profile_changed` carries the corrected header. Session `20261029-150006`
+  and writes `protocol_corrected` with the header on both sides. That event is
+  needed because `profile_changed` can resolve *before* the first sample, and
+  then it names a header the session stops using. Session `20261029-150006`
   is the evidence: `protocolFallback: ATSP0`, `protocolDetected: A0`,
   `requestHeader: 7DF`, zero `0x21` samples, every other service working.
 - **One battery report per engine cycle, not per connection.** The monitor resets
@@ -331,13 +338,15 @@ Each of these has already caused a wrong conclusion.
 
 Verified on the car: standard recording, manufacturer decode, DPF values, injector
 learning, rail pressure, turbo boost, DTC scanning on both ECUs, battery test, ZIP
-export, locked-screen background recording on the iPhone.
+export, locked-screen background recording on the iPhone, and the 10-minute idle
+disconnect (session `20261105-124750-3E44` closed itself 10m02s after the last
+sample, with the gap recorded as `data_gap_ended` / `recording_stopped`).
 
 `ReferencePointDetector` and the general `HealthEvaluator` paths are retained for
 baseline learning but are not wired into the shipped dashboard; their tests are
 not evidence about app behaviour.
 
-Not yet observed: the 10-minute idle disconnect, the 10-minute reconnect window,
+Not yet observed: the 10-minute reconnect window,
 regeneration detection against a real regeneration, quiet mode past its entry
 (silence is announced and the loop degrades as designed, but the car has not yet
 been watched waking back out of it), and the reconnect fallback on a stale

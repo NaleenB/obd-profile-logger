@@ -128,4 +128,29 @@ final class LiveModelTests: XCTestCase {
         XCTAssertEqual(details["protocolFallback"], "none")
         XCTAssertEqual(details["protocolDetected"], "")
     }
+
+    /// The rejected-pin session above keeps `7DF` in `profile_changed` until the
+    /// car answers, so the correction must be written by itself — with the
+    /// header on both sides, because that is what the log is read for.
+    func testProvisionalProtocolCorrectionRecordsBothHeaders() {
+        let correction = LiveModel.ProtocolCorrection(
+            from: "A0", to: "6", headerBefore: "7DF", headerAfter: "7E0")
+
+        XCTAssertTrue(correction.isChange)
+        let details = correction.details
+        XCTAssertEqual(details["from"], "A0")
+        XCTAssertEqual(details["to"], "6")
+        XCTAssertEqual(details["requestHeaderBefore"], "7DF")
+        XCTAssertEqual(details["requestHeader"], "7E0")
+    }
+
+    /// Auto-detection can also confirm what was guessed. A repeated reading is
+    /// not a correction, and writing one would claim a change that never
+    /// happened.
+    func testUnchangedProtocolIsNotACorrection() {
+        let correction = LiveModel.ProtocolCorrection(
+            from: "6", to: "6", headerBefore: "7E0", headerAfter: "7E0")
+
+        XCTAssertFalse(correction.isChange)
+    }
 }

@@ -62,10 +62,28 @@ public final class BatteryMonitor {
     /// around 10.6-10.9 V, above the absolute threshold.
     public static let crankDropVolts = 0.4
     public static let recoveryVolts = 13.5
+    /// How long the alternator is given to reach `recoveryVolts` after the
+    /// engine was first seen running, before its absence is graded.
+    ///
+    /// Ten seconds was shorter than this car's own ramp: on 2026-11-05 the bus
+    /// sat at 12.08 V for 11 s after a start, reached 13.5 V at 18 s and 14.4 V
+    /// at 24 s, and the report written at 11 s told the driver to check the
+    /// alternator and belt. A driving session also floats below 13.5 V for up
+    /// to a minute with a full battery, which is why the window alone is not
+    /// enough — see `sawEngineBeforeRunning`.
+    public static let recoveryWindowMs = 30_000
 
     private var samples: [VoltageSample] = []
     private var phase: BatteryPhase = .unknown
     private(set) public var observedCrank = false
+    /// True when the monitor saw the engine before it was running — ignition
+    /// on, cranking, or both.
+    ///
+    /// Charging can only be graded from a start. This system drops to 12.1-12.6 V
+    /// for up to a minute at a time once the battery is full, so a monitor that
+    /// joined an already-running engine cannot tell that from a dead alternator.
+    /// It must say so rather than accuse the car.
+    private var sawEngineBeforeRunning = false
     private var preCrankVolts: Double?
     private var preCrankBaseline: Double?
     private var chargingRecovered = false
@@ -87,6 +105,7 @@ public final class BatteryMonitor {
         samples.removeAll()
         phase = .unknown
         observedCrank = false
+        sawEngineBeforeRunning = false
         preCrankVolts = nil
         preCrankBaseline = nil
         chargingRecovered = false
@@ -106,6 +125,11 @@ public final class BatteryMonitor {
         samples.append(sample)
 
         let next = classify(sample)
+
+        // What the monitor joined decides what it may conclude later: charging
+        // observed from the ignition on can be graded, charging observed only
+        // from mid-drive cannot.
+        if next.rawRank < BatteryPhase.running.rawRank { sawEngineBeforeRunning = true }
 
         // Once the engine has been seen running, an RPM below idle means it was
         // switched off. Latching "running" is right for the phase, but charging
@@ -146,9 +170,9 @@ public final class BatteryMonitor {
                     chargingRecovered = true
                 }
                 // Only count samples once the alternator has taken over, or
-                // after ten seconds if it never does — in that case the low
-                // reading is the finding.
-                if chargingRecovered || sample.atMs - start > 10_000 {
+                // after the window has passed if it never does — in that case
+                // the low reading is the finding.
+                if chargingRecovered || sample.atMs - start > Self.recoveryWindowMs {
                     runningVoltages.append(sample.volts)
                 }
             }
@@ -254,9 +278,16 @@ public final class BatteryMonitor {
                 severity = .ok
                 message = String(format: "reached %.1f V then settled at %.2f V — consistent with a battery that is already full (smart charging)",
                                  peakRunningVolts, running)
+            } else if !sawEngineBeforeRunning {
+                // Monitoring joined an already-running engine and never saw a
+                // charge in the window. This car floats in the same range for up
+                // to a minute on a full battery, so the reading carries no
+                // verdict either way.
+                severity = .insufficientData
+                message = String(format: "%.2f V while running, but monitoring began with the engine already running and this system floats below %.1f V for up to a minute when the battery is full — charging was not graded", running, Self.recoveryVolts)
             } else {
                 severity = .watch
-                message = String(format: "%.2f V while running and never above 13.5 V — check the alternator or belt, this is not a battery fault", running)
+                message = String(format: "%.2f V while running and never above %.1f V since the start — check the alternator or belt, this is not a battery fault", running, Self.recoveryVolts)
             }
 
             findings.append(Finding(
@@ -301,14 +332,14 @@ public final class BatteryMonitor {
     }
 
     /// Median of the settled running samples: robust against the odd bad read.
-    /// True once a plausible charging voltage has been seen, or enough time has
-    /// passed that the absence of one is itself the finding.
+    /// True once a plausible charging voltage has been seen, or once the
+    /// recovery window has passed without one — see `recoveryWindowMs`.
     public var chargingSettled: Bool {
         guard let start = runningStartMs else { return false }
         // A stopped engine produces no more charging data, so report what we
         // have rather than waiting forever.
         if chargingRecovered || engineStopped { return true }
-        return samples.last.map { $0.atMs - start > 10_000 } ?? false
+        return samples.last.map { $0.atMs - start > Self.recoveryWindowMs } ?? false
     }
 
     private func runningVolts() -> Double? {

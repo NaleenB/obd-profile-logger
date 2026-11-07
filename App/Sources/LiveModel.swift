@@ -1428,6 +1428,32 @@ final class LiveModel {
     /// reading is not evidence yet, ask again once a request has been answered".
     private var protocolDetectionIsProvisional = false
 
+    /// The connect-time `ATDPN` reading is provisional until the car has
+    /// answered, and the header is derived from it. The correction is its own
+    /// event rather than a later `profile_changed`: a profile can resolve before
+    /// the first sample, so that event names the header the session then stops
+    /// using — and `requestHeader` is the field a reader uses to tell a silent
+    /// ECM from a request that never reached it.
+    struct ProtocolCorrection: Equatable {
+        var from: String?
+        var to: String
+        var headerBefore: String
+        var headerAfter: String
+
+        var isChange: Bool {
+            from != to || headerBefore != headerAfter
+        }
+
+        var details: [String: String] {
+            [
+                "from": from ?? "",
+                "to": to,
+                "requestHeaderBefore": headerBefore,
+                "requestHeader": headerAfter
+            ]
+        }
+    }
+
     private var protocolIdentifier: String? {
         detectedProtocolNumber ?? profile?.transport?.elmProtocol
     }
@@ -1475,8 +1501,21 @@ final class LiveModel {
         guard let reply = try? await elm.send("ATDPN", timeout: 2) else { return }
         let number = reply.statusSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !number.isEmpty else { return }
+        // The header before and after, not only the protocol number: a pin taken
+        // from the profile can keep the header while the number changes, and a
+        // reader diagnosing a silent ECM needs the header that was in force.
+        let previous = detectedProtocolNumber
+        let previousHeader = standardHeader
         detectedProtocolNumber = number
         protocolDetectionIsProvisional = false
+        let correction = ProtocolCorrection(
+            from: previous,
+            to: number,
+            headerBefore: previousHeader,
+            headerAfter: standardHeader)
+        if correction.isChange {
+            session.event(.protocolCorrected, correction.details)
+        }
         // The header is derived from what was just read, and the adapter is
         // holding the old one; reselect so the rest of this cycle matches.
         await selectEngineHeader(using: elm)
@@ -2121,11 +2160,8 @@ final class LiveModel {
             else { continue }
             manufacturerServiceAvailable = true
             for value in profile.decode(frame) {
-                let key = value.name
-                    .lowercased()
-                    .replacingOccurrences(of: " ", with: "_")
-                    .replacingOccurrences(of: ".", with: "")
-                details[String(format: "%02X.%@", lid, key)] = String(format: "%.2f", value.value)
+                details[TripSnapshot.key(lid: lid, name: value.name)] =
+                    String(format: "%.2f", value.value)
             }
         }
         await restoreBroadcastHeader(using: elm)
@@ -2136,18 +2172,30 @@ final class LiveModel {
         session.event(.tripSnapshot, details)
     }
 
-    /// End-of-session snapshot without new I/O. The live block is refreshed
-    /// every cycle, so these values are at most a second or two old.
+    /// End-of-session snapshot without new I/O: the link is usually already
+    /// being torn down here.
+    ///
+    /// Only the profile's snapshot identifiers are written, so this event has
+    /// the same shape as the fresh `phase: "start"` one, and the age of the
+    /// oldest value is recorded with them. Dumping the whole cached `0x21`
+    /// block recorded a parked car at 44 km/h and 1 375 rpm
+    /// (`20261104-164839-8C42`), because those identifiers are only read by the
+    /// sweep and were 65 s old at the time.
     private func emitCachedSnapshot(phase: String) {
-        guard !manufacturer.isEmpty else { return }
-        var details: [String: String] = ["phase": phase, "source": "cached"]
+        guard let profile else { return }
+        let snapshot = TripSnapshot.cached(
+            lids: profile.tripSnapshotLIDs,
+            parameters: Array(manufacturer.values),
+            updatedAt: readings.manufacturerUpdatedAt,
+            now: Date()
+        )
+        guard !snapshot.details.isEmpty else { return }
 
-        for value in manufacturer.values {
-            let key = value.name
-                .lowercased()
-                .replacingOccurrences(of: " ", with: "_")
-                .replacingOccurrences(of: ".", with: "")
-            details[String(format: "%02X.%@", value.lid, key)] = String(format: "%.2f", value.value)
+        var details = snapshot.details
+        details["phase"] = phase
+        details["source"] = "cached"
+        if let age = snapshot.maxAgeSeconds {
+            details["maxAgeSeconds"] = String(format: "%.0f", age)
         }
         if let odometerKm { details["odometerKm"] = String(odometerKm) }
         session.event(.tripSnapshot, details)
