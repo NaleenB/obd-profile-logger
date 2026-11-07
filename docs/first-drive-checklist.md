@@ -73,8 +73,9 @@ might be sampled only once. If `crankMinimumVolts` looks implausibly high
 
 ## What is still unverified
 
-- The ten-minute idle disconnect has not been observed.
-- The ten-minute reconnect window after a dropped link has not been observed.
+- Connection recovery on hardware — reconnect after a dropped link, the
+  ten-minute window, and a drop while the app is suspended — is covered by
+  [`reconnect-checklist.md`](reconnect-checklist.md).
 - Regeneration detection has not yet caught a real regeneration.
 - Trigger thresholds for regeneration (450 °C start, 300 °C end) are conventional
   values, not measured on this car.

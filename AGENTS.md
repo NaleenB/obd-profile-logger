@@ -346,13 +346,17 @@ sample, with the gap recorded as `data_gap_ended` / `recording_stopped`).
 baseline learning but are not wired into the shipped dashboard; their tests are
 not evidence about app behaviour.
 
-Not yet observed: the 10-minute reconnect window,
+Not yet observed: the 10-minute reconnect window (procedure:
+[`docs/reconnect-checklist.md`](docs/reconnect-checklist.md)),
 regeneration detection against a real regeneration, quiet mode past its entry
 (silence is announced and the loop degrades as designed, but the car has not yet
 been watched waking back out of it), and the reconnect fallback on a stale
 peripheral — that path was duplicated from the manual connect, not induced on the
 phone. Connection generations are unit-tested, but superseded BLE callbacks have
-not been forced on hardware.
+not been forced on hardware. Session `20261107-100221-5A20` is the first in the
+archive to end at `adapter_disconnected` with no `session_stopped` and no
+`finishedAt`: an unfinished session can mean the app was suspended mid-reconnect,
+not that it crashed.
 
 ## Conventions
 
