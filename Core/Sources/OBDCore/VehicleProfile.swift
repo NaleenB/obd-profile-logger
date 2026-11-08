@@ -194,6 +194,9 @@ public struct VehicleProfile: Codable, Equatable {
         public let sootByPressure: Role?
         public let regenerationCount: Role?
         public let regenerationMode: Role?
+        /// The vehicle's own outside-air sensor, when it has one. A profile that
+        /// does not declare it keeps the intake-air proxy instead.
+        public let ambientTemperature: Role?
     }
 
     public let schemaVersion: Int
@@ -441,6 +444,7 @@ extension VehicleProfile {
             try check(roles.sootByPressure, "soot by pressure")
             try check(roles.regenerationCount, "regeneration count")
             try check(roles.regenerationMode, "regeneration mode")
+            try check(roles.ambientTemperature, "ambient temperature")
             for raw in roles.priorityLIDs ?? [] {
                 guard let lid = UInt8(raw, radix: 16) else {
                     throw VehicleProfileError.malformed("priority LID '\(raw)' is not a hex byte")

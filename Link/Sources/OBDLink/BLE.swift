@@ -1,5 +1,8 @@
 import Foundation
 import CoreBluetooth
+import OSLog
+
+private let linkLog = Logger(subsystem: "com.naleen.obdlogger", category: "link")
 
 public enum BLEError: Error, CustomStringConvertible {
     case unavailable(String)
@@ -60,6 +63,10 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     }
 
     private var central: CBCentralManager?
+    /// A peripheral handed back by CoreBluetooth after the system relaunched or
+    /// resumed the app for a connection event. It is already known to the
+    /// system, so a reconnect can use it without waiting for a scan.
+    private var restoredPeripheral: CBPeripheral?
     private let lock = NSLock()
 
     private var peripheral: CBPeripheral?
@@ -113,7 +120,13 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
             central = CBCentralManager(
                 delegate: self,
                 queue: nil,
-                options: [CBCentralManagerOptionShowPowerAlertKey: true]
+                options: [
+                    CBCentralManagerOptionShowPowerAlertKey: true,
+                    // Without an identifier the system cannot hand a peripheral
+                    // back to a relaunched process, and a suspended recording
+                    // has to rediscover the adapter from scratch.
+                    CBCentralManagerOptionRestoreIdentifierKey: "com.naleen.obdlogger.central"
+                ]
             )
         }
         guard let central else {
@@ -170,6 +183,18 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         timeoutItem = nil
         lock.unlock()
         waiting?.resume(throwing: BLEError.notConnected)
+    }
+
+    public func centralManager(
+        _ central: CBCentralManager,
+        willRestoreState dict: [String: Any]
+    ) {
+        let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
+        for peripheral in restored { peripheral.delegate = self }
+        restoredPeripheral = restored.first
+        if let restoredPeripheral {
+            linkLog.notice("restored peripheral \(restoredPeripheral.identifier.uuidString, privacy: .public)")
+        }
     }
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -260,8 +285,16 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
     /// The adapter that worked last time, retrieved by identifier without a
     /// scan. Returns nil when CoreBluetooth no longer knows it.
     public func knownAdapter() -> Candidate? {
-        guard let central,
-              let known = KnownAdapter.load(),
+        guard let central else { return nil }
+        if let restoredPeripheral, restoredPeripheral.state != .disconnected {
+            let known = KnownAdapter.load()
+            return Candidate(peripheral: restoredPeripheral,
+                             name: known?.name ?? restoredPeripheral.name ?? "OBD adapter",
+                             score: 100,
+                             rssi: 0,
+                             detail: "restored by the system")
+        }
+        guard let known = KnownAdapter.load(),
               let peripheral = central.retrievePeripherals(withIdentifiers: [known.uuid]).first
         else { return nil }
         return Candidate(peripheral: peripheral,
@@ -386,7 +419,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
 
     // MARK: - Connection
 
-    public func connect(_ candidate: Candidate) async throws -> SerialPort {
+    public func connect(_ candidate: Candidate, timeout: TimeInterval = 15) async throws -> SerialPort {
         guard let central else { throw BLEError.unavailable("not started") }
         // A second connect must never inherit a prior peripheral's readiness
         // continuation, delegate callbacks or partially discovered services.
@@ -414,12 +447,13 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
             }
             connectTimeout = item
             lock.unlock()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: item)
             central.connect(peripheral, options: nil)
         }
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        linkLog.notice("connected \(peripheral.identifier.uuidString, privacy: .public)")
         guard self.peripheral?.identifier == peripheral.identifier else {
             // This connection belongs to no current attempt (for example, a
             // connect that completed after its teardown was requested). Close
@@ -459,6 +493,7 @@ public final class BLETransport: NSObject, CBCentralManagerDelegate, CBPeriphera
         guard self.peripheral?.identifier == peripheral.identifier else { return }
 
         let message = error?.localizedDescription ?? "link dropped"
+        linkLog.notice("disconnected \(peripheral.identifier.uuidString, privacy: .public): \(message, privacy: .public)")
         // A callback while services/notifications are still being set up is a
         // failed connection attempt, not a lost established link. The reconnect
         // loop will retry. Reporting it as another link-down used to invalidate

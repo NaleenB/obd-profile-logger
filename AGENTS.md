@@ -199,8 +199,11 @@ Each of these has already caused a wrong conclusion.
   `010F` stands in as the ambient proxy, but a hot intake heat-soaks: session
   `20261029-170013` recorded 61 °C on a 2 h soak while the engine idled, against
   45 °C from the profile's own air-temperature parameter. `AmbientProxy` drops
-  the value at or above 400 rpm, so a warm-start session honestly records no
-  `ambientTempC` instead of a manifold temperature.
+  the value at or above 400 rpm, but a warm bay with the engine off still fools
+  it: session `20261108-150611-E285` recorded 51 °C while the profile's own air
+  sensor read 33 °C. The Outlander profile now declares `roles.ambientTemperature`
+  (LID `02`, item 43) and the app replaces the proxy as soon as that role answers;
+  the proxy remains the fallback for a cold start, before identification.
 - **Raw `230` is a sentinel, not 950 °C.** It appears on the NTC input this car
   does not have and on the stored-maximum fields, while live temperatures read
   normally and regen peaks sit at 620–720 °C. Those parameters declare
@@ -353,10 +356,18 @@ regeneration detection against a real regeneration, quiet mode past its entry
 been watched waking back out of it), and the reconnect fallback on a stale
 peripheral — that path was duplicated from the manual connect, not induced on the
 phone. Connection generations are unit-tested, but superseded BLE callbacks have
-not been forced on hardware. Session `20261107-100221-5A20` is the first in the
-archive to end at `adapter_disconnected` with no `session_stopped` and no
-`finishedAt`: an unfinished session can mean the app was suspended mid-reconnect,
-not that it crashed.
+not been forced on hardware. Sessions `20261107-100221-5A20` and
+`20261108-110830-73E9` end at `adapter_disconnected` with no `session_stopped`
+and no `finishedAt`: an unfinished session can mean the app was suspended
+mid-reconnect, not that it crashed. The 8 Nov console shows what that looks
+like: `runningboardd` suspended the app at 10:26:41, immediately after
+`bluetoothd` invalidated its Bluetooth assertion, and resumed it only at the
+10:55 disconnect; 22 km were driven while it was suspended. A launch now
+closes any session left without `finishedAt` at its last recorded activity
+(synthesized `session_stopped`, reason `app_terminated`) and uses that instant
+for cold soak. Reconnects now hold a background task, use a 60 s pending connect
+that can outlive suspension, and the central manager declares a restore
+identifier; that recovery path has not yet been exercised on the phone.
 
 ## Conventions
 

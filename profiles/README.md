@@ -114,11 +114,15 @@ features that need one (odometer, DPF summary, priority polling) stay absent.
   "sootByAccumulation": { "lid": "11", "itemNumber": 155 },
   "sootByPressure": { "lid": "11", "itemNumber": 156 },
   "regenerationCount": { "lid": "12", "itemNumber": 148 },
-  "regenerationMode": { "lid": "12", "itemNumber": 116 }
+  "regenerationMode": { "lid": "12", "itemNumber": 116 },
+  "ambientTemperature": { "lid": "02", "itemNumber": 43 }
 }
 ```
 
 Roles include a LID because item numbers are not guaranteed to be globally unique.
+`ambientTemperature` is the vehicle's own outside-air sensor. Without it the app
+falls back to intake air (`010F`) at connect, which is only ambient while the
+engine and engine bay are cold.
 
 ### `calibrationIDs` and `vinPrefixes`
 

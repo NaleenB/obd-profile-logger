@@ -307,7 +307,9 @@ public final class BatteryMonitor {
                 label: "Start event",
                 severity: .insufficientData,
                 message: phase == .running
-                    ? "Monitoring began with the engine already running, so no crank was measured. Restart with the engine off to grade the battery."
+                    ? (sawEngineBeforeRunning
+                        ? "The engine started between samples, so no crank minimum was captured. Connect before cranking to grade the battery."
+                        : "Monitoring began with the engine already running, so no crank was measured. Restart with the engine off to grade the battery.")
                     : "No crank followed by a running engine was observed.",
                 source: .heuristic("a battery test requires a captured start"),
                 observed: nil,

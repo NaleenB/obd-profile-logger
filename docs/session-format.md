@@ -49,7 +49,7 @@ changes, and rewritten at stop with `finishedAt` and counts.
 | `profileHash` | SHA-256 of the profile JSON that describes every manufacturer sample in the session |
 | `timezoneOffsetSeconds` | offset from UTC, so `wallTime` is unambiguous |
 | `odometerStartKm` / `odometerEndKm` | from the engine ECU; needed for soot-per-km and regen interval. The start value is written as soon as it is read, which is usually after recording starts because service `0x21` only answers once the car is identified |
-| `ambientTempC` | intake air temperature, used as an ambient proxy. This ECU has no `0x46`, and intake air only describes ambient while the engine is not running, so the value is omitted at or above `BatteryMonitor.runningRpm` (400) and when engine speed could not be read |
+| `ambientTempC` | ambient temperature. Read at connect from intake air (`010F`) as a proxy, omitted at or above `BatteryMonitor.runningRpm` (400) and when engine speed could not be read. When the profile declares `roles.ambientTemperature`, that sensor replaces the proxy as soon as it answers |
 | `coldSoakHours` | hours since the previous session ended, when known |
 | `notes` | free-form, including what the recording did **not** cover |
 
@@ -59,6 +59,10 @@ The manifest is rewritten whenever one of these becomes known during the session
 not only when it closes. A session that is killed mid-recording therefore still
 describes what its samples were decoded with — which is the session most worth
 reading later. `finishedAt` absent means the recording did not close cleanly.
+On the next launch such a session is closed at its **last recorded activity**:
+a synthesized `session_stopped` (`reason: app_terminated`, `synthesized: true`)
+is appended and `finishedAt` is that activity, not the launch time. Cold soak is
+anchored to the same instant.
 
 ## samples.ndjson
 
@@ -268,7 +272,9 @@ Exactly one `session_started` is written per session, by `RecordingSession.start
 with caller metadata merged in. The link is dropped automatically after ten minutes without a successful sample,
 so a session left running with the ignition off does not sit open forever. That
 is recorded as `adapter_disconnected` with `reason: idle_timeout`. Quitting the
-app writes `session_stopped` with `reason: app_quit`.
+app writes `session_stopped` with `reason: app_quit`; a process that was killed
+while suspended has that written on the next launch, with reason
+`app_terminated` and `synthesized: true`.
 
 Lifecycle events are idempotent: `finish` writes
 at most one `session_stopped`, and a repeated stop is a no-op.

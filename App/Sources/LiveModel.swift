@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import OBDLink
 import OBDCore
+#if os(iOS)
+import UIKit
+#endif
 
 @MainActor
 @Observable
@@ -93,6 +96,12 @@ final class LiveModel {
     private var regenSootAtStart: Double?
     private var stallWatchdog: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    #if os(iOS)
+    /// Keeps the app executing for the first seconds of a reconnect. Without it
+    /// iOS can suspend the process between the link dropping and the connect
+    /// request being issued, so the retry never runs at all.
+    private var reconnectBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
     private var reconnectGate = SingleAttemptGate<ConnectionEpoch.Token>()
     /// Waits for a cancelled reconnect to relinquish the shared transport before
     /// starting its replacement.
@@ -153,6 +162,20 @@ final class LiveModel {
     private(set) var manufacturerServiceAvailable = false
 
     init() {
+        // iOS does not call `willTerminate` for a suspended process, so a
+        // session can be left with no `finishedAt`. At launch that session is
+        // over; close it at its last recorded activity, not at this moment,
+        // and anchor the next cold-soak to the same instant.
+        let repaired = SessionStore.repairInterruptedSessions()
+        if !repaired.isEmpty {
+            if let latest = repaired.compactMap(\.lastActivity).max(),
+               lastSessionEnd.map({ latest > $0 }) ?? true {
+                lastSessionEnd = latest
+                UserDefaults.standard.set(latest, forKey: "lastSessionEnd")
+            }
+            OBDLog.lifecycle.notice("closed \(repaired.count, privacy: .public) interrupted session(s)")
+        }
+
         // A profile chosen by hand in an older build would defeat automatic
         // identification, so it is discarded rather than migrated.
         UserDefaults.standard.removeObject(forKey: "profileSelection")
@@ -444,6 +467,7 @@ final class LiveModel {
         dpf = nil
         rebuildSignalList()
 
+        OBDLog.recording.notice("profile \(id, privacy: .public) via \(resolution.method.rawValue, privacy: .public)")
         if isRecording {
             // The header can change with the profile, and it is what decides
             // whether `0x21` is addressed to the ECM or lost on broadcast.
@@ -907,6 +931,7 @@ final class LiveModel {
     /// This is different from the vehicle going quiet, which is normal.
     private func handleTransportDisconnect(_ reason: String) {
         guard !intentionalDisconnect else { return }
+        OBDLog.link.notice("link dropped: \(reason, privacy: .public)")
 
         invalidateConnection()
         stallWatchdog?.cancel()
@@ -1000,7 +1025,8 @@ final class LiveModel {
     /// cannot be weaker than the manual path.
     private func connectAdapter(
         scanSeconds: TimeInterval,
-        generation: ConnectionEpoch.Token
+        generation: ConnectionEpoch.Token,
+        connectTimeout: TimeInterval = 15
     ) async throws -> AdapterConnection {
         try checkpoint(generation)
         let discoveredAt = Date()
@@ -1011,7 +1037,7 @@ final class LiveModel {
         let connectStarted = Date()
         var connected = false
         do {
-            _ = try await transport.connect(remembered)
+            _ = try await transport.connect(remembered, timeout: connectTimeout)
             connected = true
         } catch {
             // Whether the failure was the adapter or our own teardown is
@@ -1041,7 +1067,7 @@ final class LiveModel {
         let rescanMs = Date().timeIntervalSince(rescanStarted) * 1000
 
         let retryStarted = Date()
-        _ = try await transport.connect(fresh)
+        _ = try await transport.connect(fresh, timeout: connectTimeout)
         try checkpoint(generation)
         return AdapterConnection(
             candidate: fresh,
@@ -1062,6 +1088,8 @@ final class LiveModel {
         let generation = newConnectionGeneration()
         guard reconnectGate.begin(generation) else { return }
         transportLease.claim(generation)
+        beginReconnectBackgroundTask()
+        OBDLog.link.notice("reconnect attempt starting")
 
         reconnectTask = Task { [weak self] in
             guard let self else { return }
@@ -1083,8 +1111,18 @@ final class LiveModel {
                     // A remembered peripheral that has gone stale must not be
                     // retried for ten minutes while the dongle sits there
                     // advertising under a new identity.
-                    let link = try await self.connectAdapter(scanSeconds: 6, generation: generation)
+                    let link = try await self.connectAdapter(
+                        scanSeconds: 6,
+                        generation: generation,
+                        connectTimeout: 60)
                     guard self.isCurrent(generation) else { return }
+                    // A pending connect can outlive the ten-minute window while
+                    // the process is suspended. Do not let it revive a session
+                    // on the next drive: the deadline is wall clock, not ticks.
+                    guard Date() < deadline else {
+                        self.transport.disconnect()
+                        return
+                    }
                     let candidate = link.candidate
 
                     let client = ELMClient(transport: self.transport, logger: nil)
@@ -1145,13 +1183,36 @@ final class LiveModel {
     }
 
     private func finishReconnectTask(_ generation: ConnectionEpoch.Token) {
+        // End the assertion before the gate check: a cancelled task may lose
+        // ownership and still be the last thing holding the process awake.
+        endReconnectBackgroundTask()
         guard reconnectGate.finish(generation) else { return }
         reconnectTask = nil
+    }
+
+    private func beginReconnectBackgroundTask() {
+        #if os(iOS)
+        guard reconnectBackgroundTask == .invalid else { return }
+        reconnectBackgroundTask = UIApplication.shared.beginBackgroundTask(
+            withName: "adapter-reconnect"
+        ) { [weak self] in
+            Task { @MainActor in self?.endReconnectBackgroundTask() }
+        }
+        #endif
+    }
+
+    private func endReconnectBackgroundTask() {
+        #if os(iOS)
+        guard reconnectBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(reconnectBackgroundTask)
+        reconnectBackgroundTask = .invalid
+        #endif
     }
 
     private func cancelReconnect() {
         reconnectTask?.cancel()
         reconnectTask = nil
+        endReconnectBackgroundTask()
         reconnectGate.interrupt()
         reconnectRestartTask?.cancel()
         reconnectRestartTask = nil
@@ -1231,6 +1292,7 @@ final class LiveModel {
                 profileData: profileData
             )
             syncRecordingState()
+            OBDLog.recording.notice("session started profile \(self.profileID, privacy: .public)")
             lastSessionURL = session.directory
             if let existing = exportURL { SessionArchive.discard(existing) }
             exportURL = nil
@@ -1292,6 +1354,7 @@ final class LiveModel {
                 : "Manufacturer service 0x21 did not answer during this session.")
         }
         let result = session.stop(reason: reason)
+        OBDLog.recording.notice("session stopped reason \(reason, privacy: .public)")
         lastSessionEnd = Date()
         UserDefaults.standard.set(lastSessionEnd, forKey: "lastSessionEnd")
         syncRecordingState()
@@ -1388,6 +1451,7 @@ final class LiveModel {
         batteryLogged = true
         let report = battery.report()
         batteryReport = report
+        OBDLog.recording.notice("battery verdict \(report.verdict.rawValue, privacy: .public), start observed \(report.startObserved ? "true" : "false", privacy: .public)")
         session.event(.batteryTest, report.eventDetails)
     }
 
@@ -1671,6 +1735,7 @@ final class LiveModel {
             details["quietSeconds"] = String(Int(now.timeIntervalSince(last).rounded()))
         }
         session.event(.appLifecycle, details)
+        OBDLog.lifecycle.info("scene \(phase.rawValue, privacy: .public) quiet \(details["quietSeconds"] ?? "0", privacy: .public)s")
     }
 
     // MARK: - Silence
@@ -2068,6 +2133,7 @@ final class LiveModel {
             if let temperature = profile.roles?.dpfTemperature?.value(in: decodedValues) {
                 trackRegeneration(dpfTemperature: temperature)
             }
+            updateAmbientFromProfile(decodedValues)
             refreshDPFSummary()
         }
     }
@@ -2136,6 +2202,7 @@ final class LiveModel {
             }
         }
         if !decodedValues.isEmpty { noteSample(at: sampleTime) }
+        updateAmbientFromProfile(decodedValues)
         refreshDPFSummary()
     }
 
@@ -2229,6 +2296,23 @@ final class LiveModel {
         guard isRecording, odometerStartKm == nil else { return }
         odometerStartKm = reading
         session.updateOdometer(start: reading)
+    }
+
+    /// The profile's own outside-air sensor beats the intake-air proxy.
+    ///
+    /// `010F` is read before identification, when the manifest needs a value and
+    /// the profile is not known yet. It is still an intake temperature: on a warm
+    /// start the bay heat-soaks it and it records weather that did not happen.
+    /// Once the profile's role answers, replace the proxy with the real sensor.
+    private func updateAmbientFromProfile(_ decoded: [DecodedParameter]) {
+        guard let profile,
+              let value = profile.roles?.ambientTemperature?.value(in: decoded),
+              value.isFinite, value > -40, value < 70,
+              ambientTempC != value
+        else { return }
+        ambientTempC = value
+        if isRecording { session.updateAmbient(value) }
+        OBDLog.recording.notice("ambient temperature \(value, privacy: .public) C from profile sensor")
     }
 
     /// Intake air temperature with the engine off, as an ambient proxy: this ECU

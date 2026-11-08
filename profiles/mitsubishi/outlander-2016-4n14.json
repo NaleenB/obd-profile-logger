@@ -95,6 +95,10 @@
     "regenerationMode": {
       "lid": "12",
       "itemNumber": 116
+    },
+    "ambientTemperature": {
+      "lid": "02",
+      "itemNumber": 43
     }
   },
   "service": {

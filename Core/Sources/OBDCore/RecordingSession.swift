@@ -68,6 +68,18 @@ public final class RecordingSession {
         }
     }
 
+    /// Replaces the connect-time intake-air proxy once the profile's own
+    /// ambient sensor has answered.
+    ///
+    /// The proxy is read before identification because the manifest needs a
+    /// value before the engine starts. It is only an intake temperature, though:
+    /// a heat-soaked bay records the manifold temperature as weather. The
+    /// profile's sensor is the better answer whenever it is available.
+    public func updateAmbient(_ value: Double?) {
+        guard let recorder else { return }
+        recorder.updateManifest { $0.ambientTempC = value }
+    }
+
     /// Discovery can fail at connect, while the ECU is still asleep, and succeed
     /// once it answers. Record the outcome that held for the session rather than
     /// the state at the moment the manifest was first written.

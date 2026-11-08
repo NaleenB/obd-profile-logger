@@ -23,6 +23,13 @@ final class VehicleProfileTests: XCTestCase {
         XCTAssertGreaterThan(profile.blocks.count, 50)
     }
 
+    func testShippedProfileDeclaresAnAmbientSensor() throws {
+        let profile = try shippedProfile()
+        let role = try XCTUnwrap(profile.roles?.ambientTemperature)
+        XCTAssertEqual(role.lid, "02")
+        XCTAssertEqual(role.itemNumber, 43)
+    }
+
     func testEveryBlockHasAParsableIdentifier() throws {
         let profile = try shippedProfile()
         for block in profile.blocks {
